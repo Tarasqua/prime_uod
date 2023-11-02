@@ -15,6 +15,13 @@ class BackgroundSubtractor:
     """
 
     def __init__(self, frame_shape: np.array, config_data: dict):
+        """
+        Нахождение временно статических объектов, путем нахождения абсолютной разницы
+        между исходными кадрами без движения, полученными в результате замены пикселей
+        движения пикселями заднего плана из моделей с разным временем накопления.
+        :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
+        :param config_data: Параметры из конфига, относящиеся к вычитанию фона.
+        """
         self.gsoc_slow = cv2.bgsegm.createBackgroundSubtractorGSOC(
             hitsThreshold=config_data['GSOC_MODELS']['HITS_THRESHOLD'],
             replaceRate=config_data['GSOC_MODELS']['REPLACE_RATE_SLOW']

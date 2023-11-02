@@ -21,6 +21,10 @@ class UOD:
     """
 
     def __init__(self, frame_shape: np.array):
+        """
+        Детектор оставленных предметов.
+        :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
+        """
         config_ = Config('config.yml')
         self.bg_subtractor = BackgroundSubtractor(frame_shape, config_.get('BG_SUBTRACTION'))
         self.yolo_seg = self.__set_yolo_model(config_.get('HUMAN_DETECTION', 'YOLO_MODEL'))
