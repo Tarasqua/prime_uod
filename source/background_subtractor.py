@@ -14,14 +14,17 @@ class BackgroundSubtractor:
     Нахождение временно статических объектов по модели фона
     """
 
-    def __init__(self, frame_shape: np.array, config_data: dict):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, config_data: dict, roi: np.array):
         """
         Нахождение временно статических объектов, путем нахождения абсолютной разницы
         между исходными кадрами без движения, полученными в результате замены пикселей
         движения пикселями заднего плана из моделей с разным временем накопления.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
+        :param frame_dtype: Тип кадра последовательности (cv2 image.dtype).
         :param config_data: Параметры из конфига, относящиеся к вычитанию фона.
+        :param roi: Полигон ROI.
         """
+        # Модели вычитания фонов
         self.gsoc_slow = cv2.bgsegm.createBackgroundSubtractorGSOC(
             hitsThreshold=config_data['GSOC_MODELS']['HITS_THRESHOLD'],
             replaceRate=config_data['GSOC_MODELS']['REPLACE_RATE_SLOW']
@@ -30,16 +33,35 @@ class BackgroundSubtractor:
             hitsThreshold=config_data['GSOC_MODELS']['HITS_THRESHOLD'],
             replaceRate=config_data['GSOC_MODELS']['REPLACE_RATE_FAST']
         )
-
+        self.gsoc_mid = cv2.bgsegm.createBackgroundSubtractorGSOC(
+            hitsThreshold=config_data['GSOC_MODELS']['HITS_THRESHOLD'],
+            replaceRate=config_data['GSOC_MODELS']['REPLACE_RATE_FAST'] / 2
+        )
+        # Морфологическое закрытие для маски движения
         self.morph_close_kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, tuple(config_data['MORPH_CLOSE']['KERNEL_SIZE']))
         self.morph_close_iterations = config_data['MORPH_CLOSE']['ITERATIONS']
-
+        # Дополнительные переменные
         self.frame_shape = frame_shape[:-1][::-1]
         self.resize_shape = (np.array(self.frame_shape) / config_data['REDUCE_FRAME_SHAPE_MULTIPLIER']).astype(int)
-        self.area_threshold = np.prod(np.array(self.frame_shape)) * 0.005
+        self.area_threshold = (np.prod(np.array(self.frame_shape)) *  # % от площади кадра
+                               (config_data['AREA_THRESH_FRAME_PERCENT'] * 0.01))
+        self.roi_stencil = self.__get_roi_mask(frame_shape[:-1], frame_dtype, roi)
 
         self.fg_mask = None
+
+    @staticmethod
+    def __get_roi_mask(frame_shape: tuple[int, int, int], frame_dtype: np.dtype, roi: np.array) -> np.array:
+        """
+        Создает маску, залитую черным вне ROI
+        :param frame_shape: Размер изображения (height, width, channels).
+        :param frame_dtype: Тип изображения (uint8, etc).
+        :param roi: Полигон точек вида np.array([[x, y], [x, y], ...]).
+        :return: Маска, залитая белым внутри ROI и черным - во вне.
+        """
+        stencil = np.zeros(frame_shape).astype(frame_dtype)
+        cv2.fillPoly(stencil, [roi], (255, 255, 255))
+        return stencil
 
     @staticmethod
     async def __get_frame_wo_movements(
@@ -66,7 +88,10 @@ class BackgroundSubtractor:
                 скоростью изменения сцены;
             - берет абсолютную разность полученных изображений, блюрит, бинаризирует, а также
                 применяет морфологическое закрытие;
-            - в итоге получает маску со временно статическими объектами.
+            - затем к исходному изображению применяется еще одна модель со скоростью накопления,
+                в два раза меньшей скорости накопления быстрой модели;
+            - так, для дополнительного удаления шумов в итоговой маске, в тех местах, где есть
+                движение в маске со средним значением накопления, удаляется движение из итоговой.
         :param current_frame: Текущее переданное изображение.
         :return: Маска со временно статическими объектами.
         """
@@ -80,8 +105,14 @@ class BackgroundSubtractor:
         _, fg_mask = cv2.threshold(  # и бинаризируем с помощью OTSU
             cv2.cvtColor(blured, cv2.COLOR_BGR2GRAY),
             150, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        closing = cv2.morphologyEx(  # а также в конце делаем морфологическое закрытие
+        closing = cv2.morphologyEx(  # а также делаем морфологическое закрытие
             fg_mask, cv2.MORPH_CLOSE, self.morph_close_kernel, iterations=self.morph_close_iterations)
+        # используем еще одну модель со средней скоростью накопления
+        fg_mask_mid = self.gsoc_mid.apply(resized_frame)
+        closing_mid = cv2.morphologyEx(  # морфологическое закрытие к ней
+            fg_mask_mid, cv2.MORPH_CLOSE, self.morph_close_kernel, iterations=self.morph_close_iterations)
+        # убираем движение в итоговой маске в тех местах, где есть движение на средней
+        closing[closing_mid == 255] = 0
         return cv2.resize(closing, self.frame_shape)  # в исходный размер
 
     async def __remove_person(self, det_mask: np.array):
@@ -97,11 +128,10 @@ class BackgroundSubtractor:
     async def get_temp_stat_objects(
             self, current_frame: np.array, det_masks: ultralytics.engine.results.Masks) -> np.ndarray:
         """
-        Возвращает bbox'ы временно статических объектов
-        TODO: временно возвращает маску со временно статическими объектами
+        Возвращает bbox'ы временно статических объектов, области которых отфильтрованы по площади
         :param current_frame:
         :param det_masks:
-        :return:
+        :return: bbox'ы временно статических объектов формата np.array([[x1, y1, x2, y2], [x1, y1, x2, y2], ...])
         """
         # получаем маску со временно статическими объектами
         self.fg_mask = await self.__get_fg_mask(current_frame)
@@ -110,5 +140,14 @@ class BackgroundSubtractor:
             remove_person_tasks = [asyncio.create_task(self.__remove_person(mask))
                                    for mask in det_masks.data.numpy()]
             [await task for task in remove_person_tasks]
-
-        return self.fg_mask
+        # применяем ROI к итоговой маске
+        self.fg_mask = cv2.bitwise_and(self.fg_mask, self.roi_stencil)
+        # находим связные области в маске
+        connected_areas = cv2.connectedComponentsWithStats(self.fg_mask, 4, cv2.CV_32S)
+        # и получаем из них bbox'ы объектов из маски
+        fg_bboxes = np.fromiter(map(  # распаковка из xywh в xyxy
+            lambda xywha: np.array([xywha[0], xywha[1], xywha[0] + xywha[2], xywha[1] + xywha[3]]),
+            [(x, y, w, h, area) for x, y, w, h, area in connected_areas[2][1:]  # тк первый элемент - это весь кадр
+             if area > self.area_threshold]  # фильтрация по площади от мелких шумов
+        ), dtype=np.dtype((int, 4)))
+        return fg_bboxes

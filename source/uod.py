@@ -20,15 +20,22 @@ class UOD:
     Unattended Object Detector
     """
 
-    def __init__(self, frame_shape: np.array):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: np.array, remove_people: bool = True):
         """
         Детектор оставленных предметов.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
+        :param frame_dtype: Тип кадра последовательности (cv2 image.dtype).
+        :param roi: Полигон ROI.
+        :param remove_people: Удалять из маски движения людей или нет.
         """
+        self.roi = roi
+        self.remove_people = remove_people  # для отладки или для большей производительности и меньшей точности
         config_ = Config('config.yml')
-        self.bg_subtractor = BackgroundSubtractor(frame_shape, config_.get('BG_SUBTRACTION'))
-        self.yolo_seg = self.__set_yolo_model(config_.get('HUMAN_DETECTION', 'YOLO_MODEL'))
-        self.yolo_conf = config_.get('HUMAN_DETECTION', 'YOLO_CONFIDENCE')
+        self.bg_subtractor = BackgroundSubtractor(frame_shape, frame_dtype, config_.get('BG_SUBTRACTION'), roi)
+        self.yolo_seg = self.__set_yolo_model(config_.get('HUMAN_DETECTION', 'YOLO_MODEL')) \
+            if remove_people else None
+        self.yolo_conf = config_.get('HUMAN_DETECTION', 'YOLO_CONFIDENCE') \
+            if remove_people else None
 
     @staticmethod
     def __set_yolo_model(yolo_model) -> YOLO:
@@ -49,14 +56,20 @@ class UOD:
     async def detect_(self, current_frame: np.array):
         """
         Детекция оставленных предметов в последовательности кадров.
-        TODO: временно возвращает маску со временно статическими объектами
+        TODO: временно возвращает текущий кадр со всеми временно статическими объектами
         :param current_frame: Текущее изображение последовательности.
         :return: bbox оставленного предмета.
         """
-        start = time.perf_counter()  # считаем FPS
-        detections: ultralytics.engine.results = self.yolo_seg.predict(
-            current_frame, classes=[0], verbose=False, conf=self.yolo_conf)[0]
-        fg_mask = await self.bg_subtractor.get_temp_stat_objects(current_frame, detections.masks)
-
-        print(1 / (time.perf_counter() - start))
-        return fg_mask
+        # start = time.perf_counter()  # считаем FPS
+        # получаем bbox'ы из модели фона
+        if self.remove_people:
+            detections: ultralytics.engine.results = self.yolo_seg.predict(
+                current_frame, classes=[0], verbose=False, conf=self.yolo_conf)[0]
+            fg_bboxes = await self.bg_subtractor.get_temp_stat_objects(current_frame, detections.masks)
+        else:
+            fg_bboxes = await self.bg_subtractor.get_temp_stat_objects(current_frame, None)
+        # строим все временно статические объекты (временное решение)
+        for bbox in fg_bboxes:
+            cv2.rectangle(current_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
+        # print(1 / (time.perf_counter() - start))
+        return current_frame

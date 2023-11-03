@@ -23,16 +23,15 @@ class Main:
         cap = cv2.VideoCapture(self.stream_source)
         _, frame = cap.read()
         assert frame is not None, "Couldn't open stream source"
-        uod = UOD(frame.shape)
-        # roi = ROIPolygon().get_roi(frame)
-        # stencil = np.zeros(frame.shape).astype(frame.dtype)
-        # bg_stencil = cv2.fillPoly(stencil, [roi], (255, 255, 255))
-        # demo = self.__get_demo('demo_fg_2.mp4', (int(cap.get(3)), int(cap.get(4))))
+        roi = ROIPolygon().get_roi(frame)
+        uod = UOD(frame.shape, frame.dtype, roi, False)
+        # demo = self.__get_demo('demo_fg_without.mp4', (int(cap.get(3)), int(cap.get(4))))
         while cap.isOpened():
             _, frame = cap.read()
             if frame is None:
                 break
             frame = await uod.detect_(frame)
+            # demo.write(cv2.merge((frame, frame, frame)))
             cv2.imshow('foreground', frame)
             if cv2.waitKey(1) & 0xFF == 27:
                 break
