@@ -44,8 +44,6 @@ class BackgroundSubtractor:
         # Дополнительные переменные
         self.frame_shape = frame_shape[:-1][::-1]
         self.resize_shape = (np.array(self.frame_shape) / config_data['REDUCE_FRAME_SHAPE_MULTIPLIER']).astype(int)
-        self.area_threshold = (np.prod(np.array(self.frame_shape)) *  # % от площади кадра
-                               (config_data['AREA_THRESH_FRAME_PERCENT'] * 0.01))
         self.roi_stencil = self.__get_roi_mask(frame_shape[:-1], frame_dtype, roi)
 
         self.fg_mask = None
@@ -125,13 +123,14 @@ class BackgroundSubtractor:
         mask = ops.scale_image(det_mask, self.frame_shape[::-1])[:, :, 0]
         self.fg_mask[mask == 1] = 0
 
-    async def get_temp_stat_objects(
-            self, current_frame: np.array, det_masks: ultralytics.engine.results.Masks) -> np.ndarray:
+    async def get_tso_mask(
+            self, current_frame: np.array, det_masks: ultralytics.engine.results.Masks) -> cv2.typing.MatLike:
         """
-        Возвращает bbox'ы временно статических объектов, области которых отфильтрованы по площади
+        TSO - temporary static objects.
+        Нахождение временно статических объектов по модели фона.
         :param current_frame:
         :param det_masks:
-        :return: bbox'ы временно статических объектов формата np.array([[x1, y1, x2, y2], [x1, y1, x2, y2], ...])
+        :return: Бинаризованная маска со временно статическими объектами.
         """
         # получаем маску со временно статическими объектами
         self.fg_mask = await self.__get_fg_mask(current_frame)
@@ -140,14 +139,5 @@ class BackgroundSubtractor:
             remove_person_tasks = [asyncio.create_task(self.__remove_person(mask))
                                    for mask in det_masks.data.numpy()]
             [await task for task in remove_person_tasks]
-        # применяем ROI к итоговой маске
-        self.fg_mask = cv2.bitwise_and(self.fg_mask, self.roi_stencil)
-        # находим связные области в маске
-        connected_areas = cv2.connectedComponentsWithStats(self.fg_mask, 4, cv2.CV_32S)
-        # и получаем из них bbox'ы объектов из маски
-        fg_bboxes = np.fromiter(map(  # распаковка из xywh в xyxy
-            lambda xywha: np.array([xywha[0], xywha[1], xywha[0] + xywha[2], xywha[1] + xywha[3]]),
-            [(x, y, w, h, area) for x, y, w, h, area in connected_areas[2][1:]  # тк первый элемент - это весь кадр
-             if area > self.area_threshold]  # фильтрация по площади от мелких шумов
-        ), dtype=np.dtype((int, 4)))
-        return fg_bboxes
+        # применяем ROI к итоговой маске и возвращаем ее
+        return cv2.bitwise_and(self.fg_mask, self.roi_stencil)

@@ -25,13 +25,13 @@ class Main:
         assert frame is not None, "Couldn't open stream source"
         roi = ROIPolygon().get_roi(frame)
         uod = UOD(frame.shape, frame.dtype, roi, False)
-        # demo = self.__get_demo('demo_fg_without.mp4', (int(cap.get(3)), int(cap.get(4))))
+        # demo = self.__get_demo('demo_uod.mp4', (int(cap.get(3)), int(cap.get(4))))
         while cap.isOpened():
             _, frame = cap.read()
             if frame is None:
                 break
             frame = await uod.detect_(frame)
-            # demo.write(cv2.merge((frame, frame, frame)))
+            # demo.write(frame)
             cv2.imshow('foreground', frame)
             if cv2.waitKey(1) & 0xFF == 27:
                 break
