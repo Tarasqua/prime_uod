@@ -41,6 +41,7 @@ class UOD:
         self.area_threshold = (np.prod(np.array(frame_shape[:-1])) *  # % от площади кадра
                                (config_.get('UOD', 'AREA_THRESH_FRAME_PERCENT') * 0.01))
         self.suspicious_objects: List[SuspiciousObject] = []
+        self.susp_obj_area_threshold = 1.1
 
     @staticmethod
     def __set_yolo_model(yolo_model) -> YOLO:
@@ -63,15 +64,16 @@ class UOD:
         Обработка связной области, полученной из модели фона:
             - фильтрация по площади;
             - переводи из xywh в xyxy;
-            - объединение координат bbox'а с координатами центроида.
+            - объединение координат bbox'а и площади контура с координатами центроида.
         :param centroid: Координаты центроида связной области.
         :param stat: Координаты bbox'а и площадь связной области.
-        :return: Массив с координатами центроида и bbox'а области вида np.array([c_x, c_y, x1, y1, x2, y2]).
+        :return: Массив с координатами центроида и bbox'а области + площади контура
+            вида np.array([c_x, c_y, x1, y1, x2, y2, area]).
         """
         if stat[-1] < self.area_threshold:
             return None
-        x, y, w, h = stat[:-1]
-        return np.concatenate([centroid, [x, y, x + w, y + h]]).astype(int)
+        x, y, w, h, area = stat
+        return np.concatenate([centroid, [x, y, x + w, y + h, area]]).astype(int)
 
     async def __get_mask_data(self, tso_mask: cv2.typing.MatLike) -> np.array:
         """
@@ -85,42 +87,71 @@ class UOD:
         process_area_tasks = [asyncio.create_task(self.__process_area(centroid, stat))
                               for centroid, stat in zip(connected_areas[3][1:], connected_areas[2][1:])]
         centroids_bboxes = await asyncio.gather(*process_area_tasks)
-        return np.array([bbox for bbox in centroids_bboxes if bbox is not None])
+        return np.array([bbox for bbox in centroids_bboxes if bbox is not None])  # фильтруем None
 
-    async def __match_bbox(self, data):
+    async def __update_suspicious_object(self, suspicious_object: SuspiciousObject, data: np.array) -> None:
         """
-        Сопоставление одной рамки с уже имеющимися по центроидам.
-        TODO: сделать более красиво + сделать идентификацю предмета как оставленного + обработку исчезновения.
-        :param data: np.array([centroid_x, centroid_y, x1, y1, x2, y2])
-        :return: _
+        Обновление подозрительного объекта, в зависимости от изменения площади контура.
+            Если площадь контура увеличилась более чем на n%, обновляем координаты рамки объекта.
+        :param suspicious_object: Объект класса подозрительного объекта.
+        :param data: Новые данные в формате np.array([centroid_x, centroid_y, x1, y1, x2, y2, area]).
         """
-        matched = False
-        for susp_obj in self.suspicious_objects:
-            x1, y1, x2, y2 = susp_obj.bbox_coordinates
-            if x1 <= data[0] <= x2 and y1 <= data[1] <= y2:
-                susp_obj.update(
-                    observation_counter=1, bbox_coordinated=data[2:], centroid_coordinates=data[:2])
-                matched = True
-        if not matched:
-            self.suspicious_objects.append(SuspiciousObject(
-                bbox_coordinates=data[2:],
-                centroid_coordinates=data[:2]
-            ))
-
-    async def __match_mask_data(self, mask_data):
-        """
-        Сопоставление всех рамок.
-        TODO: доделать (описано выше).
-        :param mask_data:
-        :return:
-        """
-        if not self.suspicious_objects:
-            [self.suspicious_objects.append(
-                SuspiciousObject(bbox_coordinates=data[2:], centroid_coordinates=data[:2]))
-             for data in mask_data]
+        if (abs(suspicious_object.contour_area - data[-1]) / suspicious_object.contour_area
+                > self.susp_obj_area_threshold):
+            suspicious_object.update(observation_counter=1, contour_area=data[-1],
+                                     bbox_coordinated=data[2:-1], centroid_coordinates=data[:2])
         else:
-            match_bbox_tasks = [asyncio.create_task(self.__match_bbox(data)) for data in mask_data]
-            [await task for task in match_bbox_tasks]
+            suspicious_object.update(observation_counter=1)
+
+    async def __match_bbox(self, data) -> None:
+        """
+        Сопоставление нового полученного объекта с уже имеющимися в базе подозрительных
+            по координатам центроидов.
+        :param data: Данные по объекту из маски в формате np.array([centroid_x, centroid_y, x1, y1, x2, y2, area])
+        """
+        matched = False  # для отслеживания того, что объект сопоставился
+        for suspicious_object in self.suspicious_objects:
+            x1, y1, x2, y2 = suspicious_object.bbox_coordinates
+            # если координаты центроида внутри bbox'а => новый объект сопоставлен => обновляем текущий
+            if x1 <= data[0] <= x2 and y1 <= data[1] <= y2:
+                await self.__update_suspicious_object(suspicious_object, data)
+                matched = True  # сопоставился
+            else:
+                # также отслеживаем тот факт, что данного объекта базы нет на текущем кадре
+                suspicious_object.update(updated=False)
+        # если объект не был сопоставлен ни с одним из базы => это новый объект => добавляем в базу
+        if not matched:
+            self.suspicious_objects.append(
+                SuspiciousObject(contour_area=data[-1], bbox_coordinates=data[2:-1], centroid_coordinates=data[:2]))
+
+    async def __match_mask_data(self, mask_data: np.array) -> None:
+        """
+        Сопоставление только что полученных данных из маски, а также обновление уже существующих в базе данных.
+        TODO: сделать идентификацю предмета как оставленного.
+        :param mask_data: Все данные, полученные из маски в формате
+            np.array([[centroid_x, centroid_y, x1, y1, x2, y2, area], [...]]).
+        """
+        if not self.suspicious_objects:  # если список пустой, добавляем все объекты
+            [self.suspicious_objects.append(
+                SuspiciousObject(contour_area=data[-1], bbox_coordinates=data[2:-1], centroid_coordinates=data[:2]))
+                for data in mask_data]
+        else:  # если не пустой
+            # и если временно статических объектов в кадре не найдено
+            if mask_data.size == 0:
+                # выставляем флаг обновления на текущем кадре у всех объектов в базе на False
+                for suspicious_object in self.suspicious_objects:
+                    suspicious_object.update(updated=False)
+            else:  # если же в кадре есть временно статические объекты
+                # связываем только что полученные с уже имеющимися объектами
+                match_bbox_tasks = [asyncio.create_task(self.__match_bbox(data)) for data in mask_data]
+                [await task for task in match_bbox_tasks]
+            # обновляем счетчики отсутствия в кадре
+            for suspicious_object in self.suspicious_objects:
+                if not suspicious_object.updated:
+                    suspicious_object.update(disappearance_counter=1, updated=True)
+            # удаляем унесенные объекты
+            self.suspicious_objects = [suspicious_object for suspicious_object in self.suspicious_objects
+                                       if suspicious_object.disappearance_counter != 0]
 
     async def detect_(self, current_frame: np.array):
         """
@@ -138,8 +169,7 @@ class UOD:
         else:
             tso_mask = await self.bg_subtractor.get_tso_mask(current_frame, None)
         mask_data = await self.__get_mask_data(tso_mask)
-        if mask_data.size != 0:
-            await self.__match_mask_data(mask_data)
+        await self.__match_mask_data(mask_data)
         # строим все временно статические объекты (временное решение)
         for bbox in self.suspicious_objects:
             x1, y1, x2, y2 = bbox.bbox_coordinates
