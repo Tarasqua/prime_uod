@@ -113,12 +113,12 @@ class BackgroundSubtractor:
         closing[closing_mid == 255] = 0
         return cv2.resize(closing, self.frame_shape)  # в исходный размер
 
-    async def __remove_person(self, det_mask: np.array):
+    async def __remove_person(self, det_mask: np.array) -> None:
         """
         По сегментационной маске, вычитает человека из маски со временно статическими предметами
         (на случай, если человек задержался в кадре).
         :param det_mask: Бинарная маска, в которой 1 - сегмент человека, 0 - фон.
-        :return: Маска со временно статическими предметами без сегмента человека.
+        :return: None.
         """
         mask = ops.scale_image(det_mask, self.frame_shape[::-1])[:, :, 0]
         self.fg_mask[mask == 1] = 0

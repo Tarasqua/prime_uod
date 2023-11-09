@@ -13,14 +13,16 @@ class SuspiciousObject(BaseModel):
     :param bbox_coordinates: Координаты bbox'а объекта.
     :param centroid_coordinates: Координаты центроида объекта.
     :param updated: Флаг, отвечающий за то, что объект на текущем кадре обновился
-        (нужен, чтобы обновлять счетчик отсутствия в кадре)
+        (нужен, чтобы обновлять счетчик отсутствия в кадре).
+    :param unattended: Подтверждение, что подозрительный предмет - оставленный.
     """
-    observation_counter: int = 1000  # тк предмет уже присутствует какое-то время в кадре в момент обнаружения
-    disappearance_counter: int = 150  # примерно 5 секунд
+    observation_counter: int = 900  # примерно 30 секунд уже находится в кадре
+    disappearance_counter: int = 120  # примерно 4 секунды
     contour_area: int = 0
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     centroid_coordinates: np.array = Field(default_factory=lambda: np.zeros(2))
     updated: bool = True
+    unattended: bool = False
 
     class Config:
         """Для того чтобы была возможность объявлять поля как numpy array."""
@@ -45,3 +47,19 @@ class SuspiciousObject(BaseModel):
                     self.centroid_coordinates = value
                 case 'updated':
                     self.updated = value
+                case 'unattended':
+                    self.unattended = value
+
+
+class UnattendedObject(BaseModel):
+    """
+    Структура данных для выявленных оставленных предметов.
+    :param bbox_coordinates: Координаты bbox'а объекта.
+    :param detection_frame: Кадр, когда объект был впервые обнаружен.
+    """
+    bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
+    detection_frame: np.array = np.array([])
+
+    class Config:
+        """Для того чтобы была возможность объявлять поля как numpy array."""
+        arbitrary_types_allowed = True
