@@ -14,7 +14,7 @@ class BackgroundSubtractor:
     Нахождение временно статических объектов по модели фона
     """
 
-    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, config_data: dict, roi: np.array):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, config_data: dict, roi: list):
         """
         Нахождение временно статических объектов, путем нахождения абсолютной разницы
         между исходными кадрами без движения, полученными в результате замены пикселей
@@ -22,7 +22,7 @@ class BackgroundSubtractor:
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
         :param frame_dtype: Тип кадра последовательности (cv2 image.dtype).
         :param config_data: Параметры из конфига, относящиеся к вычитанию фона.
-        :param roi: Полигон ROI.
+        :param roi: Список ROI-полигонов.
         """
         # Модели вычитания фонов
         self.gsoc_slow = cv2.bgsegm.createBackgroundSubtractorGSOC(
@@ -49,7 +49,7 @@ class BackgroundSubtractor:
         self.fg_mask = None
 
     @staticmethod
-    def __get_roi_mask(frame_shape: tuple[int, int, int], frame_dtype: np.dtype, roi: np.array) -> np.array:
+    def __get_roi_mask(frame_shape: tuple[int, int, int], frame_dtype: np.dtype, roi: list) -> np.array:
         """
         Создает маску, залитую черным вне ROI
         :param frame_shape: Размер изображения (height, width, channels).
@@ -58,7 +58,7 @@ class BackgroundSubtractor:
         :return: Маска, залитая белым внутри ROI и черным - во вне.
         """
         stencil = np.zeros(frame_shape).astype(frame_dtype)
-        cv2.fillPoly(stencil, [roi], (255, 255, 255))
+        cv2.fillPoly(stencil, roi, (255, 255, 255))
         return stencil
 
     @staticmethod

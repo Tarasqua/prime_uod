@@ -23,12 +23,12 @@ class UOD:
     Unattended Object Detector
     """
 
-    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: np.array, remove_people: bool = True):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: list, remove_people: bool = True):
         """
         Детектор оставленных предметов.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
         :param frame_dtype: Тип кадра последовательности (cv2 image.dtype).
-        :param roi: Полигон ROI.
+        :param roi: Список ROI-полигонов.
         :param remove_people: Удалять из маски движения людей или нет.
         """
         self.roi = roi
