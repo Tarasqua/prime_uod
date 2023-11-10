@@ -15,8 +15,22 @@ UOD:
     YOLO_MODEL: "n"
     YOLO_CONFIDENCE: 0.25
   CON_COMPONENTS_CONNECTIVITY: 8
-  AREA_THRESH_FRAME_PERCENT: 0.01
+  # чтобы фильтровать совсем уж маленькие фрагменты
+  AREA_THRESH_FRAME_PERCENT: 0.1
+  # граница для сопоставления объектов между кадров по IOU
   IOU_THRESHOLD: 0.2
-  DETECTED_OBJ_AREA_THRESHOLD: 1.1
-  DETECTED_TO_SUSPICIOUS_TIMEOUT: 750
-  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 900
+  # на сколько должна увеличиться площадь контура объекта, чтобы
+  # изменить координаты рамки
+  DETECTED_OBJ_AREA_THRESHOLD: 1.01
+  # через сколько кадров обнаруженный становится подозрительным
+  DETECTED_TO_SUSPICIOUS_TIMEOUT: 150
+  # через сколько кадров подозрительный становится унесенным
+  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 300
+
+DETECTED_OBJECT:
+  # ВРЕМЕННОЕ РЕШЕНИЕ
+  # количество кадров, прошедшее с момента фактического появления
+  # в кадре до момента появления в маске
+  DEFAULT_OBSERVATION_COUNTER: 900
+  # количество кадров, которое должно пройти, чтобы забыть объект
+  DEFAULT_DISAPPEARANCE_COUNTER: 120

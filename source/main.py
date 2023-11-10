@@ -32,12 +32,16 @@ class Main:
         roi = ROIPolygon().get_roi(frame)
         uod = UOD(frame.shape, frame.dtype, roi, False)
         # demo = self.__get_demo('demo_uod.mp4', (int(cap.get(3)), int(cap.get(4))))
-        # cv2.namedWindow('foreground')
-        # cv2.setMouseCallback('foreground', self.__check_click)
+        cv2.namedWindow('foreground')
+        cv2.setMouseCallback('foreground', self.__check_click)
+        counter = 1
         while cap.isOpened():
             _, frame = cap.read()
             if frame is None:
                 break
+            if self.timer_flag:
+                print(counter)
+                counter += 1
             frame = await uod.detect_(frame)
             # demo.write(frame)
             cv2.imshow('foreground', frame)

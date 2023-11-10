@@ -6,6 +6,7 @@ from pathlib import Path
 import asyncio
 from typing import List
 from collections import deque
+from itertools import combinations
 
 import cv2
 import numpy as np
@@ -48,10 +49,13 @@ class UOD:
         # пороговое значение (в %) изменения площади для изменения координат рамки
         self.det_obj_area_threshold = config_.get('UOD', 'DETECTED_OBJ_AREA_THRESHOLD')
         self.unattended_objects: List[UnattendedObject] = []  # оставленные предметы
-        # сколько кадров должен пролежать предмет для подтверждения того, что он - подозрительный
-        self.suspicious_frames_timeout = config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT')
+        # сколько кадров должен пролежать предмет для подтверждения того, что он - подозрительный, с учетом
+        # времени, потраченного на его обнаружение
+        self.suspicious_frames_timeout = config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') + \
+                                         config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
         # сколько кадров должен пролежать предмет для подтверждения того, что он - оставленный
-        self.unattended_frames_timeout = config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT')
+        self.unattended_frames_timeout = config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT') + \
+                                         config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
         # история кадров
         self.history_frames = deque(maxlen=self.unattended_frames_timeout)
         self.frame = None
@@ -110,10 +114,11 @@ class UOD:
         :param data: Новые данные в формате np.array([centroid_x, centroid_y, x1, y1, x2, y2, area]).
         :return: None.
         """
-        if (abs(detected_object.contour_area - data[-1]) / detected_object.contour_area
+        # TODO: что, если еще один объект появится рядом, который будет меньше текущего?
+        if ((data[-1] - detected_object.contour_area) / detected_object.contour_area
                 > self.det_obj_area_threshold):
             detected_object.update(observation_counter=1, contour_area=data[-1],
-                                   bbox_coordinated=data[2:-1], centroid_coordinates=data[:2])
+                                   bbox_coordinated=data[2:-1], centroid_coordinates=data[:2],)
         else:
             detected_object.update(observation_counter=1)
 
@@ -125,7 +130,7 @@ class UOD:
             np.array([centroid_x, centroid_y, x1, y1, x2, y2, area])
         :return: None.
         """
-        matched = False  # для отслеживания того, что объект сопоставился
+        matched = False  # для отслеживания того, что новый обнаруженный объект сопоставился
         for detected_object in self.detected_objects:
             # если IOU больше порогового => новый объект сопоставлен => обновляем текущий
             if iou(new_obj_data[2:-1], detected_object.bbox_coordinates) > self.iou_threshold:
@@ -160,9 +165,32 @@ class UOD:
                                  detection_frame=self.history_frames[0]))
             # помечаем его как оставленный в списке подозрительных
             detected_object.update(unattended=True)
+            # и, так как предмет уже долгое время находится в кадре, сбрасываем счетчик отсутствия,
+            # чтобы он подсвечивался немного дольше
+            detected_object.reset_dis_counter()
         # обновление счетчика отсутствия (убавляем, если объект не был найден в текущем кадре)
         if not detected_object.updated:
             detected_object.update(disappearance_counter=1, updated=True)
+
+    async def __delete_duplicates(self) -> None:
+        """
+        Удаление задублированных рамок объектов, которые возникают вследствие "разорванного"
+            появления объекта в маске движения.
+        TODO: сделать асинхронной для каждой пары.
+        :return: None.
+        """
+        # используем вспомогательный массив, в который будем складывать объекты с меньшей площадью;
+        # а затем возьмем в итоговый список только те элементы, которых нет в задублированных, т.е. те
+        # у которых площадь больше
+        duplicates = []
+        for obj1, obj2 in combinations(self.detected_objects, 2):
+            if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > self.iou_threshold:
+                # так как объект задублировался => он проявляется => сбрасываем счетчик исчезновения
+                obj1.reset_dis_counter(), obj2.reset_dis_counter()
+                # берем меньший по площади
+                duplicates.append(obj1 if obj1.contour_area < obj2.contour_area else obj2)
+        # фильтруем
+        self.detected_objects = [obj for obj in self.detected_objects if obj not in duplicates]
 
     async def __check_detected_objects(self) -> None:
         """
@@ -173,13 +201,15 @@ class UOD:
             (то есть предмета больше в кадре нет).
         :return: None.
         """
-        # проверяем и обновляем подозрительные
+        # проверяем и обновляем обнаруженные
         check_detected_tasks = [asyncio.create_task(self.__check_detected(detected_object))
                                 for detected_object in self.detected_objects]
         [await task for task in check_detected_tasks]
         # удаляем унесенные объекты
         self.detected_objects = [detected_object for detected_object in self.detected_objects
                                  if detected_object.disappearance_counter != 0]
+        # удаляем дубликаты обнаруженных объектов
+        await self.__delete_duplicates()
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
         """
@@ -205,7 +235,14 @@ class UOD:
             # проверяем, не залежался ли какой-либо предмет + обновляем счетчик отсутствия и удаляем унесенные
             await self.__check_detected_objects()
 
-    async def __save_unattended_object(self, obj_data: UnattendedObject):
+    @staticmethod
+    async def __save_unattended_object(obj_data: UnattendedObject) -> None:
+        """
+        Временный метод для демонстрации работы детектора.
+            Сохраняет кадр, сделанный во время обнаружения предмета.
+        :param obj_data: Данные по оставленному объекту - объект класса UnattendedObject.
+        :return: None.
+        """
         x1, y1, x2, y2 = obj_data.bbox_coordinates
         cv2.rectangle(obj_data.detection_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
         detections_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'uod_detections')

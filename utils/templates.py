@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
 from pydantic import BaseModel, Field
+from source.config_loader import Config
 
 
 class DetectedObject(BaseModel):
@@ -15,11 +16,13 @@ class DetectedObject(BaseModel):
     :param centroid_coordinates: Координаты центроида объекта.
     :param updated: Флаг, отвечающий за то, что объект на текущем кадре обновился
         (нужен, чтобы обновлять счетчик отсутствия в кадре).
-    :param suspicious:
+    :param suspicious: Подтверждение, что обнаруженный предмет - подозрительный.
     :param unattended: Подтверждение, что подозрительный предмет - оставленный.
     """
-    observation_counter: int = 500  # примерно 20 секунд уже находится в кадре
-    disappearance_counter: int = 120  # примерно 4 секунды
+    __config = Config('config.yml')
+
+    observation_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
+    disappearance_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
     contour_area: int = 0
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     centroid_coordinates: np.array = Field(default_factory=lambda: np.zeros(2))
@@ -31,10 +34,11 @@ class DetectedObject(BaseModel):
         """Для того чтобы была возможность объявлять поля как numpy array."""
         arbitrary_types_allowed = True
 
-    def update(self, **new_data):
+    def update(self, **new_data) -> None:
         """
         Обновление данных.
         :param new_data: Новые данные.
+        :return: None.
         """
         for field, value in new_data.items():
             match field:
@@ -54,6 +58,14 @@ class DetectedObject(BaseModel):
                     self.suspicious = value
                 case 'unattended':
                     self.unattended = value
+
+    def reset_dis_counter(self) -> None:
+        """
+        Выставляет дефолтное значение из конфига для счетчика отсутствия объекта.
+        :return: None.
+        """
+        self.disappearance_counter: int = self.__config.get(
+            'DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
 
 
 class UnattendedObject(BaseModel):
