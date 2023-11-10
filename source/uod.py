@@ -2,7 +2,6 @@
 @tarasqua
 """
 import os
-import time
 from pathlib import Path
 import asyncio
 from typing import List
@@ -15,7 +14,8 @@ from ultralytics import YOLO
 
 from config_loader import Config
 from background_subtractor import BackgroundSubtractor
-from templates import SuspiciousObject, UnattendedObject
+from utils.templates import DetectedObject, UnattendedObject
+from utils.support_functions import iou
 
 
 class UOD:
@@ -43,10 +43,13 @@ class UOD:
                                (config_.get('UOD', 'AREA_THRESH_FRAME_PERCENT') * 0.01))
         self.con_comp_connectivity = config_.get('UOD', 'CON_COMPONENTS_CONNECTIVITY')
 
-        self.suspicious_objects: List[SuspiciousObject] = []  # подозрительные предметы
+        self.detected_objects: List[DetectedObject] = []  # обнаруженные в маске движения предметы
+        self.iou_threshold = config_.get('UOD', 'IOU_THRESHOLD')
         # пороговое значение (в %) изменения площади для изменения координат рамки
-        self.susp_obj_area_threshold = config_.get('UOD', 'SUSP_OBJ_AREA_THRESHOLD')
+        self.det_obj_area_threshold = config_.get('UOD', 'DETECTED_OBJ_AREA_THRESHOLD')
         self.unattended_objects: List[UnattendedObject] = []  # оставленные предметы
+        # сколько кадров должен пролежать предмет для подтверждения того, что он - подозрительный
+        self.suspicious_frames_timeout = config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT')
         # сколько кадров должен пролежать предмет для подтверждения того, что он - оставленный
         self.unattended_frames_timeout = config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT')
         # история кадров
@@ -99,80 +102,84 @@ class UOD:
         centroids_bboxes = await asyncio.gather(*process_area_tasks)
         return np.array([bbox for bbox in centroids_bboxes if bbox is not None])  # фильтруем None
 
-    async def __update_suspicious_object(self, suspicious_object: SuspiciousObject, data: np.array) -> None:
+    async def __update_detected_object(self, detected_object: DetectedObject, data: np.array) -> None:
         """
-        Обновление подозрительного объекта, в зависимости от изменения площади контура.
+        Обновление обнаруженного в маске движения объекта, в зависимости от изменения площади контура.
             Если площадь контура увеличилась более чем на n%, обновляем координаты рамки объекта.
-        :param suspicious_object: Объект класса подозрительного объекта.
+        :param detected_object: Объект класса обнаруженного в маске движения объекта.
         :param data: Новые данные в формате np.array([centroid_x, centroid_y, x1, y1, x2, y2, area]).
         :return: None.
         """
-        if (abs(suspicious_object.contour_area - data[-1]) / suspicious_object.contour_area
-                > self.susp_obj_area_threshold):
-            suspicious_object.update(observation_counter=1, contour_area=data[-1],
-                                     bbox_coordinated=data[2:-1], centroid_coordinates=data[:2])
+        if (abs(detected_object.contour_area - data[-1]) / detected_object.contour_area
+                > self.det_obj_area_threshold):
+            detected_object.update(observation_counter=1, contour_area=data[-1],
+                                   bbox_coordinated=data[2:-1], centroid_coordinates=data[:2])
         else:
-            suspicious_object.update(observation_counter=1)
+            detected_object.update(observation_counter=1)
 
     async def __match_new_object(self, new_obj_data: np.array) -> None:
         """
-        Сопоставление нового полученного объекта с уже имеющимися в базе подозрительных
+        Сопоставление нового полученного объекта с уже имеющимися в базе обнаруженных
             по координатам центроидов.
         :param new_obj_data: Данные по объекту из маски в формате
             np.array([centroid_x, centroid_y, x1, y1, x2, y2, area])
         :return: None.
         """
         matched = False  # для отслеживания того, что объект сопоставился
-        for suspicious_object in self.suspicious_objects:
-            x1, y1, x2, y2 = suspicious_object.bbox_coordinates
-            # если координаты центроида внутри bbox'а => новый объект сопоставлен => обновляем текущий
-            if x1 <= new_obj_data[0] <= x2 and y1 <= new_obj_data[1] <= y2:
-                await self.__update_suspicious_object(suspicious_object, new_obj_data)
+        for detected_object in self.detected_objects:
+            # если IOU больше порогового => новый объект сопоставлен => обновляем текущий
+            if iou(new_obj_data[2:-1], detected_object.bbox_coordinates) > self.iou_threshold:
+                await self.__update_detected_object(detected_object, new_obj_data)
                 matched = True  # сопоставился
             else:
                 # также отслеживаем тот факт, что данного объекта из базы нет на текущем кадре
-                suspicious_object.update(updated=False)
+                detected_object.update(updated=False)
         # если объект не был сопоставлен ни с одним из базы => это новый объект => добавляем в базу
         if not matched:
-            self.suspicious_objects.append(
-                SuspiciousObject(contour_area=new_obj_data[-1], bbox_coordinates=new_obj_data[2:-1],
-                                 centroid_coordinates=new_obj_data[:2]))
+            self.detected_objects.append(
+                DetectedObject(contour_area=new_obj_data[-1], bbox_coordinates=new_obj_data[2:-1],
+                               centroid_coordinates=new_obj_data[:2]))
 
-    async def __check_suspicious(self, suspicious_object: SuspiciousObject) -> None:
+    async def __check_detected(self, detected_object: DetectedObject) -> None:
         """
-        Вспомогательная функция для __check_suspicious_objects -
-            обработка одного подозрительного объекта.
-        :param suspicious_object: Подозрительный объект.
+        Вспомогательная функция для __check_detected_objects -
+            обработка одного обнаруженного объекта.
+        :param detected_object: Обнаруженный объект.
         :return: None.
         """
-        # проверка по таймауту
-        if suspicious_object.observation_counter >= self.unattended_frames_timeout and \
-                not suspicious_object.unattended:
+        # проверка по таймауту на подозрительно долгое пребывание в кадре
+        if detected_object.observation_counter >= self.suspicious_frames_timeout and \
+                not detected_object.suspicious:
+            # помечаем его как подозрительный
+            detected_object.update(suspicious=True)
+        if detected_object.observation_counter >= self.unattended_frames_timeout and \
+                not detected_object.unattended:
             # добавляем в список с оставленными
             self.unattended_objects.append(
-                UnattendedObject(bbox_coordinates=suspicious_object.bbox_coordinates,
+                UnattendedObject(bbox_coordinates=detected_object.bbox_coordinates,
                                  detection_frame=self.history_frames[0]))
             # помечаем его как оставленный в списке подозрительных
-            suspicious_object.update(unattended=True)
+            detected_object.update(unattended=True)
         # обновление счетчика отсутствия (убавляем, если объект не был найден в текущем кадре)
-        if not suspicious_object.updated:
-            suspicious_object.update(disappearance_counter=1, updated=True)
+        if not detected_object.updated:
+            detected_object.update(disappearance_counter=1, updated=True)
 
-    async def __check_suspicious_objects(self) -> None:
+    async def __check_detected_objects(self) -> None:
         """
-        Проверяем по таймауту время наблюдения за подозрительными объектами и, в случае
-            прохождения проверки, помечаем объект как оставленный и добавляем к оставленным.
+        Проверяем по таймауту время наблюдения за обнаруженными объектами и, в случае
+            прохождения проверки, в зависимости от времени наблюдения, помечаем объект как
+            подозрительный или оставленный и, в случае выявления последнего, добавляем к оставленным.
         Также обновляем счетчик отсутствия и удаляем те объекты, в которых счетчик достиг нуля
             (то есть предмета больше в кадре нет).
         :return: None.
         """
         # проверяем и обновляем подозрительные
-        check_suspicious_tasks = [asyncio.create_task(self.__check_suspicious(suspicious_object))
-                                  for suspicious_object in self.suspicious_objects]
-        [await task for task in check_suspicious_tasks]
+        check_detected_tasks = [asyncio.create_task(self.__check_detected(detected_object))
+                                for detected_object in self.detected_objects]
+        [await task for task in check_detected_tasks]
         # удаляем унесенные объекты
-        self.suspicious_objects = [suspicious_object for suspicious_object in self.suspicious_objects
-                                   if suspicious_object.disappearance_counter != 0]
+        self.detected_objects = [detected_object for detected_object in self.detected_objects
+                                 if detected_object.disappearance_counter != 0]
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
         """
@@ -181,22 +188,22 @@ class UOD:
             np.array([[centroid_x, centroid_y, x1, y1, x2, y2, area], [...]]).
         :return: None.
         """
-        if not self.suspicious_objects:  # если список пустой, добавляем все объекты
-            [self.suspicious_objects.append(
-                SuspiciousObject(contour_area=data[-1], bbox_coordinates=data[2:-1], centroid_coordinates=data[:2]))
+        if not self.detected_objects:  # если список пустой, добавляем все объекты
+            [self.detected_objects.append(
+                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1], centroid_coordinates=data[:2]))
                 for data in mask_data]
         else:  # если не пустой
             # и если временно статических объектов в кадре не найдено
             if mask_data.size == 0:
                 # выставляем флаг обновления на текущем кадре у всех объектов в базе на False
-                for suspicious_object in self.suspicious_objects:
-                    suspicious_object.update(updated=False)
+                for detected_object in self.detected_objects:
+                    detected_object.update(updated=False)
             else:  # если же в кадре есть временно статические объекты
                 # связываем только что полученные с уже имеющимися объектами
                 match_bbox_tasks = [asyncio.create_task(self.__match_new_object(data)) for data in mask_data]
                 [await task for task in match_bbox_tasks]
             # проверяем, не залежался ли какой-либо предмет + обновляем счетчик отсутствия и удаляем унесенные
-            await self.__check_suspicious_objects()
+            await self.__check_detected_objects()
 
     async def __save_unattended_object(self, obj_data: UnattendedObject):
         x1, y1, x2, y2 = obj_data.bbox_coordinates
@@ -205,10 +212,10 @@ class UOD:
         im_path = os.path.join(detections_path, f'{len(os.listdir(detections_path)) + 1}.png')
         cv2.imwrite(im_path, obj_data.detection_frame)
 
-    async def plot_(self, object_data: SuspiciousObject) -> None:
+    async def plot_(self, object_data: DetectedObject) -> None:
         """
         Отрисовка bbox'ов и id объектов.
-        :param object_data: Данные по объекту - объект класса SuspiciousObject.
+        :param object_data: Данные по объекту - объект класса DetectedObject.
         :return: None.
         """
         x1, y1, x2, y2 = object_data.bbox_coordinates
@@ -235,12 +242,14 @@ class UOD:
         mask_data = await self.__get_mask_data(tso_mask)
         await self.__match_mask_data(mask_data)
         self.frame = current_frame
-        # строим подозрительные объекты (временное решение)
-        plot_tasks = [asyncio.create_task(self.plot_(data)) for data in self.suspicious_objects]
+        # отрисовываем подозрительные и/или оставленные объекты (временное решение)
+        plot_tasks = [asyncio.create_task(self.plot_(detected_object)) for detected_object in self.detected_objects
+                      if detected_object.suspicious or detected_object.unattended]
         [await task for task in plot_tasks]
-        # сохраняем найденные оставленные предметы
+        # сохраняем обнаруженные оставленные предметы
         if self.unattended_objects:
             save_tasks = [asyncio.create_task(self.__save_unattended_object(obj)) for obj in self.unattended_objects]
             [await task for task in save_tasks]
             self.unattended_objects.clear()
-        return self.frame
+        # return self.frame
+        return np.concatenate([self.frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)

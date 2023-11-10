@@ -1,10 +1,10 @@
 import asyncio
+import tkinter as tk
+from tkinter import filedialog
 
 import cv2
-import numpy as np
 
-from config_loader import Config
-from roi_polygon import ROIPolygon
+from utils.roi_polygon import ROIPolygon
 from uod import UOD
 
 
@@ -30,21 +30,14 @@ class Main:
         _, frame = cap.read()
         assert frame is not None, "Couldn't open stream source"
         roi = ROIPolygon().get_roi(frame)
-        # roi = np.array(
-        #     [[279, 84], [203, 129], [131, 179], [32, 259], [14, 278], [12, 570], [705, 571], [704, 517], [703, 425],
-        #      [550, 257], [451, 168], [423, 161], [379, 77]])
         uod = UOD(frame.shape, frame.dtype, roi, False)
         # demo = self.__get_demo('demo_uod.mp4', (int(cap.get(3)), int(cap.get(4))))
         # cv2.namedWindow('foreground')
         # cv2.setMouseCallback('foreground', self.__check_click)
-        frames_counter = 0
         while cap.isOpened():
             _, frame = cap.read()
             if frame is None:
                 break
-            # if self.timer_flag:
-            #     frames_counter += 1
-            #     print(frames_counter)
             frame = await uod.detect_(frame)
             # demo.write(frame)
             cv2.imshow('foreground', frame)
@@ -56,8 +49,8 @@ class Main:
 
 
 if __name__ == '__main__':
-    main = Main('../resources/video/video12.avi')
-    # main = Main('../resources/video/video1.avi')
-    # main = Main('../resources/video/video5.avi')
-    # main = Main('rtsp://admin:Qwer123@192.168.9.219/cam/realmonitor?channel=1&subtype=0')
+    root = tk.Tk()
+    root.withdraw()
+    file_path = filedialog.askopenfilename()
+    main = Main(file_path)
     asyncio.run(main.main())

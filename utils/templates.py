@@ -3,10 +3,11 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 
-class SuspiciousObject(BaseModel):
+class DetectedObject(BaseModel):
     """
-    Структура данных для найденного, но не подтвержденного, как оставленный,
-        временно статического в кадре предмета.
+    Структура данных для найденного в маске движения предмета, прошедшего фильтрацию по
+        площади. Данный предмет имеет два флага - подозрительный и оставленный предмет,
+        которые меняют свое состояние в зависимости от времени нахождения в кадре.
     :param observation_counter: Счетчик кадров наблюдения за объектом.
     :param disappearance_counter: Счетчик кадров отсутствия объекта.
     :param contour_area: Площадь контура объекта, взятая из маски временно статических объектов.
@@ -14,14 +15,16 @@ class SuspiciousObject(BaseModel):
     :param centroid_coordinates: Координаты центроида объекта.
     :param updated: Флаг, отвечающий за то, что объект на текущем кадре обновился
         (нужен, чтобы обновлять счетчик отсутствия в кадре).
+    :param suspicious:
     :param unattended: Подтверждение, что подозрительный предмет - оставленный.
     """
-    observation_counter: int = 900  # примерно 30 секунд уже находится в кадре
+    observation_counter: int = 500  # примерно 20 секунд уже находится в кадре
     disappearance_counter: int = 120  # примерно 4 секунды
     contour_area: int = 0
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     centroid_coordinates: np.array = Field(default_factory=lambda: np.zeros(2))
     updated: bool = True
+    suspicious: bool = False
     unattended: bool = False
 
     class Config:
@@ -47,6 +50,8 @@ class SuspiciousObject(BaseModel):
                     self.centroid_coordinates = value
                 case 'updated':
                     self.updated = value
+                case 'suspicious':
+                    self.suspicious = value
                 case 'unattended':
                     self.unattended = value
 
