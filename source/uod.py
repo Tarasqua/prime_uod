@@ -7,6 +7,7 @@ import asyncio
 from typing import List
 from collections import deque
 from itertools import combinations
+from operator import itemgetter
 
 import cv2
 import numpy as np
@@ -106,21 +107,22 @@ class UOD:
         centroids_bboxes = await asyncio.gather(*process_area_tasks)
         return np.array([bbox for bbox in centroids_bboxes if bbox is not None])  # фильтруем None
 
-    async def __update_detected_object(self, detected_object: DetectedObject, data: np.array) -> None:
+    async def __update_detected_object(self, detected_object: DetectedObject, new_obj_data: np.array) -> None:
         """
         Обновление обнаруженного в маске движения объекта, в зависимости от изменения площади контура.
             Если площадь контура увеличилась более чем на n%, обновляем координаты рамки объекта.
         :param detected_object: Объект класса обнаруженного в маске движения объекта.
-        :param data: Новые данные в формате np.array([centroid_x, centroid_y, x1, y1, x2, y2, area]).
+        :param new_obj_data: Новые данные в формате np.array([centroid_x, centroid_y, x1, y1, x2, y2, area]).
         :return: None.
         """
         # TODO: что, если еще один объект появится рядом, который будет меньше текущего?
-        if ((data[-1] - detected_object.contour_area) / detected_object.contour_area
+        if ((new_obj_data[-1] - detected_object.contour_area) / detected_object.contour_area
                 > self.det_obj_area_threshold):
-            detected_object.update(observation_counter=1, contour_area=data[-1],
-                                   bbox_coordinated=data[2:-1], centroid_coordinates=data[:2],)
+            detected_object.update(observation_counter=1, contour_area=new_obj_data[-1],
+                                   bbox_coordinated=new_obj_data[2:-1], centroid_coordinates=new_obj_data[:2],
+                                   updated=True)
         else:
-            detected_object.update(observation_counter=1)
+            detected_object.update(observation_counter=1, updated=True)
 
     async def __match_new_object(self, new_obj_data: np.array) -> None:
         """
@@ -130,20 +132,28 @@ class UOD:
             np.array([centroid_x, centroid_y, x1, y1, x2, y2, area])
         :return: None.
         """
-        matched = False  # для отслеживания того, что новый обнаруженный объект сопоставился
-        for detected_object in self.detected_objects:
-            # если IOU больше порогового => новый объект сопоставлен => обновляем текущий
-            if iou(new_obj_data[2:-1], detected_object.bbox_coordinates) > self.iou_threshold:
-                await self.__update_detected_object(detected_object, new_obj_data)
-                matched = True  # сопоставился
-            else:
-                # также отслеживаем тот факт, что данного объекта из базы нет на текущем кадре
-                detected_object.update(updated=False)
-        # если объект не был сопоставлен ни с одним из базы => это новый объект => добавляем в базу
-        if not matched:
+        # находим iou между текущим новым объектом и теми, что уже были обнаружены
+        new_detected_iou = [(idx, iou(new_obj_data[2:-1], detected_object.bbox_coordinates))
+                            for idx, detected_object in enumerate(self.detected_objects)]
+        # из них находим те, что проходят по порогу
+        thresh_filtered_iou = [(idx, v) for idx, v in new_detected_iou if v > self.iou_threshold]
+        if thresh_filtered_iou:  # если какой-либо объект прошел по порогу =>
+            # находим индекс объекта из базы, с которым IOU выше =>
+            max_iou_idx = max(thresh_filtered_iou, key=itemgetter(1))[0]
+            # обновляем его
+            await self.__update_detected_object(self.detected_objects[max_iou_idx], new_obj_data)
+            # а также отслеживаем тот факт, что другие объекты не сопоставились
+            # при условии того, что они не сопоставились с другими объектами
+            [self.detected_objects[idx].update(updated=False) for idx, _ in new_detected_iou if
+             idx != max_iou_idx and not self.detected_objects[idx].updated]
+        else:  # если же ни один по порогу не прошел => это новый объект => добавляем в базу
             self.detected_objects.append(
                 DetectedObject(contour_area=new_obj_data[-1], bbox_coordinates=new_obj_data[2:-1],
-                               centroid_coordinates=new_obj_data[:2]))
+                               centroid_coordinates=new_obj_data[:2])
+            )
+            # и ставим остальным объектам флаг на то, что они обновились - False
+            [self.detected_objects[idx].update(updated=False) for idx, _ in new_detected_iou
+             if self.detected_objects[idx].updated]
 
     async def __check_detected(self, detected_object: DetectedObject) -> None:
         """
@@ -167,7 +177,7 @@ class UOD:
             detected_object.update(unattended=True)
             # и, так как предмет уже долгое время находится в кадре, сбрасываем счетчик отсутствия,
             # чтобы он подсвечивался немного дольше
-            detected_object.reset_dis_counter()
+            # detected_object.reset_dis_counter()
         # обновление счетчика отсутствия (убавляем, если объект не был найден в текущем кадре)
         if not detected_object.updated:
             detected_object.update(disappearance_counter=1, updated=True)
@@ -209,7 +219,7 @@ class UOD:
         self.detected_objects = [detected_object for detected_object in self.detected_objects
                                  if detected_object.disappearance_counter != 0]
         # удаляем дубликаты обнаруженных объектов
-        await self.__delete_duplicates()
+        # await self.__delete_duplicates()
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
         """

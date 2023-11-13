@@ -31,7 +31,7 @@ class Main:
         assert frame is not None, "Couldn't open stream source"
         roi = ROIPolygon().get_roi(frame)
         uod = UOD(frame.shape, frame.dtype, roi, False)
-        # demo = self.__get_demo('demo_uod.mp4', (int(cap.get(3)), int(cap.get(4))))
+        # demo = self.__get_demo('demo_uod.mp4', (1440, 576))
         cv2.namedWindow('foreground')
         cv2.setMouseCallback('foreground', self.__check_click)
         counter = 1
