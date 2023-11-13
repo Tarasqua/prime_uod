@@ -15,6 +15,6 @@ def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
     :return: IOU.
     """
     return ops.box_iou(
-        torch.tensor([bbox1], dtype=torch.float),
-        torch.tensor([bbox2], dtype=torch.float),
+        torch.from_numpy(np.array([bbox1])),
+        torch.from_numpy(np.array([bbox2])),
     ).numpy()[0][0]
