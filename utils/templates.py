@@ -26,7 +26,7 @@ class DetectedObject(BaseModel):
     contour_area: int = 0
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     centroid_coordinates: np.array = Field(default_factory=lambda: np.zeros(2))
-    updated: bool = True
+    updated: bool = False
     suspicious: bool = False
     unattended: bool = False
 
@@ -58,14 +58,6 @@ class DetectedObject(BaseModel):
                     self.suspicious = value
                 case 'unattended':
                     self.unattended = value
-
-    def reset_dis_counter(self) -> None:
-        """
-        Выставляет дефолтное значение из конфига для счетчика отсутствия объекта.
-        :return: None.
-        """
-        self.disappearance_counter: int = self.__config.get(
-            'DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
 
 
 class UnattendedObject(BaseModel):

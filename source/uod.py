@@ -142,18 +142,11 @@ class UOD:
             max_iou_idx = max(thresh_filtered_iou, key=itemgetter(1))[0]
             # обновляем его
             await self.__update_detected_object(self.detected_objects[max_iou_idx], new_obj_data)
-            # а также отслеживаем тот факт, что другие объекты не сопоставились
-            # при условии того, что они не сопоставились с другими объектами
-            [self.detected_objects[idx].update(updated=False) for idx, _ in new_detected_iou if
-             idx != max_iou_idx and not self.detected_objects[idx].updated]
         else:  # если же ни один по порогу не прошел => это новый объект => добавляем в базу
             self.detected_objects.append(
                 DetectedObject(contour_area=new_obj_data[-1], bbox_coordinates=new_obj_data[2:-1],
                                centroid_coordinates=new_obj_data[:2])
             )
-            # и ставим остальным объектам флаг на то, что они обновились - False
-            [self.detected_objects[idx].update(updated=False) for idx, _ in new_detected_iou
-             if self.detected_objects[idx].updated]
 
     async def __check_detected(self, detected_object: DetectedObject) -> None:
         """
@@ -175,32 +168,12 @@ class UOD:
                                  detection_frame=self.history_frames[0]))
             # помечаем его как оставленный в списке подозрительных
             detected_object.update(unattended=True)
-            # и, так как предмет уже долгое время находится в кадре, сбрасываем счетчик отсутствия,
-            # чтобы он подсвечивался немного дольше
-            # detected_object.reset_dis_counter()
-        # обновление счетчика отсутствия (убавляем, если объект не был найден в текущем кадре)
+        # обновление счетчика отсутствия (убавляем, если объект не был сопоставлен в текущем кадре)
         if not detected_object.updated:
-            detected_object.update(disappearance_counter=1, updated=True)
-
-    async def __delete_duplicates(self) -> None:
-        """
-        Удаление задублированных рамок объектов, которые возникают вследствие "разорванного"
-            появления объекта в маске движения.
-        TODO: сделать асинхронной для каждой пары.
-        :return: None.
-        """
-        # используем вспомогательный массив, в который будем складывать объекты с меньшей площадью;
-        # а затем возьмем в итоговый список только те элементы, которых нет в задублированных, т.е. те
-        # у которых площадь больше
-        duplicates = []
-        for obj1, obj2 in combinations(self.detected_objects, 2):
-            if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > self.iou_threshold:
-                # так как объект задублировался => он проявляется => сбрасываем счетчик исчезновения
-                obj1.reset_dis_counter(), obj2.reset_dis_counter()
-                # берем меньший по площади
-                duplicates.append(obj1 if obj1.contour_area < obj2.contour_area else obj2)
-        # фильтруем
-        self.detected_objects = [obj for obj in self.detected_objects if obj not in duplicates]
+            detected_object.update(disappearance_counter=1)
+        else:
+            # если же объект был сопоставлен в текущем кадре, меняем флаг на False для следующего кадра
+            detected_object.update(updated=False)
 
     async def __check_detected_objects(self) -> None:
         """
@@ -218,8 +191,28 @@ class UOD:
         # удаляем унесенные объекты
         self.detected_objects = [detected_object for detected_object in self.detected_objects
                                  if detected_object.disappearance_counter != 0]
-        # удаляем дубликаты обнаруженных объектов
-        # await self.__delete_duplicates()
+
+    async def __check_suspicious_duplicates(self):
+        """
+        Проверка и удаление дубликатов подозрительных предметов:
+            Так как крупные предметы проявляются в маске постепенно => могут дублироваться; а так как
+            проверять все обнаруженные объекты не имеет смысла, ввиду того, что они появляются и пропадают
+            достаточно быстро и большинство из них не сопоставится, проверяем только подозрительные.
+        :return:
+        """
+        # TODO: сделать асинхронную обработку каждой пары
+        # используем вспомогательный массив, в который будем складывать объекты с меньшей площадью;
+        # а затем возьмем в итоговый список только те элементы, которых нет в задублированных, т.е. те,
+        # у которых площадь больше, а также кроме тех, что не являются подозрительными
+        duplicates = []
+        for obj1, obj2 in combinations(self.detected_objects, 2):
+            if not obj1.suspicious and not obj2.suspicious:  # если оба - не подозрительные
+                continue
+            if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > 0:
+                # берем меньший по площади
+                duplicates.append(obj1 if obj1.contour_area < obj2.contour_area else obj2)
+        # фильтруем
+        self.detected_objects = [obj for obj in self.detected_objects if obj not in duplicates or not obj.suspicious]
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
         """
@@ -244,6 +237,8 @@ class UOD:
                 [await task for task in match_bbox_tasks]
             # проверяем, не залежался ли какой-либо предмет + обновляем счетчик отсутствия и удаляем унесенные
             await self.__check_detected_objects()
+            # удаляем возможные дубликаты подозрительных предметов
+            await self.__check_suspicious_duplicates()
 
     @staticmethod
     async def __save_unattended_object(obj_data: UnattendedObject) -> None:
