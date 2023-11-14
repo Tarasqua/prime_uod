@@ -17,7 +17,7 @@ from ultralytics import YOLO
 from config_loader import Config
 from tso_detector import TSODetector
 from utils.templates import DetectedObject, UnattendedObject
-from utils.support_functions import iou
+from utils.support_functions import iou, save_unattended_object
 
 
 class UOD:
@@ -207,23 +207,9 @@ class UOD:
             # удаляем возможные дубликаты подозрительных предметов
             await self.__check_suspicious_duplicates()
 
-    @staticmethod
-    async def __save_unattended_object(obj_data: UnattendedObject) -> None:
+    async def __plot_bbox(self, object_data: DetectedObject) -> None:
         """
-        Временный метод для демонстрации работы детектора.
-            Сохраняет кадр, сделанный во время обнаружения предмета.
-        :param obj_data: Данные по оставленному объекту - объект класса UnattendedObject.
-        :return: None.
-        """
-        x1, y1, x2, y2 = obj_data.bbox_coordinates
-        cv2.rectangle(obj_data.detection_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        detections_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'uod_detections')
-        im_path = os.path.join(detections_path, f'{len(os.listdir(detections_path)) + 1}.png')
-        cv2.imwrite(im_path, obj_data.detection_frame)
-
-    async def plot_(self, object_data: DetectedObject) -> None:
-        """
-        Отрисовка bbox'ов и id объектов.
+        Отрисовка bbox'ов предметов.
         :param object_data: Данные по объекту - объект класса DetectedObject.
         :return: None.
         """
@@ -251,12 +237,12 @@ class UOD:
         await self.__match_mask_data(mask_data)
         self.frame = current_frame
         # отрисовываем подозрительные и/или оставленные объекты (временное решение)
-        plot_tasks = [asyncio.create_task(self.plot_(detected_object)) for detected_object in self.detected_objects
+        plot_tasks = [asyncio.create_task(self.__plot_bbox(detected_object)) for detected_object in self.detected_objects
                       if detected_object.suspicious or detected_object.unattended]
         [await task for task in plot_tasks]
         # сохраняем обнаруженные оставленные предметы
         if self.unattended_objects:
-            save_tasks = [asyncio.create_task(self.__save_unattended_object(obj)) for obj in self.unattended_objects]
+            save_tasks = [asyncio.create_task(save_unattended_object(obj)) for obj in self.unattended_objects]
             [await task for task in save_tasks]
             self.unattended_objects.clear()
         # return self.frame

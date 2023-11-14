@@ -1,10 +1,15 @@
 """
 Вспомогательные функции
 """
+import os
+from pathlib import Path
 
+import cv2
 import numpy as np
 import torch
 from torchvision import ops
+
+from utils.templates import UnattendedObject, DetectedObject
 
 
 def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
@@ -18,3 +23,16 @@ def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
         torch.from_numpy(np.array([bbox1])),
         torch.from_numpy(np.array([bbox2])),
     ).numpy()[0][0]
+
+
+async def save_unattended_object(obj_data: UnattendedObject) -> None:
+    """
+    Сохраняет кадр, сделанный во время обнаружения предмета.
+    :param obj_data: Данные по оставленному объекту - объект класса UnattendedObject.
+    :return: None.
+    """
+    x1, y1, x2, y2 = obj_data.bbox_coordinates
+    cv2.rectangle(obj_data.detection_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+    detections_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'uod_detections')
+    im_path = os.path.join(detections_path, f'{len(os.listdir(detections_path)) + 1}.png')
+    cv2.imwrite(im_path, obj_data.detection_frame)
