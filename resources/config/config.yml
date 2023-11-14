@@ -35,17 +35,17 @@ UOD:
   # граница для сопоставления объектов между кадров по IOU
   IOU_THRESHOLD: 0.2
   # на сколько должна увеличиться площадь контура объекта, чтобы
-  # изменить координаты рамки
-  DETECTED_OBJ_AREA_THRESHOLD: 0.2
+  # изменить координаты рамки, в %
+  DETECTED_OBJ_AREA_THRESHOLD: 2
   # через сколько кадров обнаруженный становится подозрительным
   DETECTED_TO_SUSPICIOUS_TIMEOUT: 150
   # через сколько кадров подозрительный становится унесенным
-  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 300
+  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 450
 
 DETECTED_OBJECT:
   # ВРЕМЕННОЕ РЕШЕНИЕ
   # количество кадров, прошедшее с момента фактического появления
   # в кадре до момента появления в маске
-  DEFAULT_OBSERVATION_COUNTER: 570
+  DEFAULT_OBSERVATION_COUNTER: 480
   # количество кадров, которое должно пройти, чтобы забыть объект
   DEFAULT_DISAPPEARANCE_COUNTER: 60

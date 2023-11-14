@@ -59,6 +59,22 @@ class DetectedObject(BaseModel):
                 case 'unattended':
                     self.unattended = value
 
+    def set_dis_counter(self, value: int) -> None:
+        """
+        Выставление конкретного значения на счетчик отсутствия.
+        :param value: Интовое значение.
+        :return: None.
+        """
+        self.disappearance_counter = value
+
+    def set_obs_counter(self, value):
+        """
+        Выставление конкретного значения на счетчик наблюдения.
+        :param value: Интовое значение.
+        :return: None.
+        """
+        self.observation_counter = value
+
 
 class UnattendedObject(BaseModel):
     """
