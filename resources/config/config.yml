@@ -1,22 +1,37 @@
+# Temporarily Static Objects
+TSO:
+  # чтобы фильтровать совсем уж маленькие фрагменты
+  AREA_THRESH_FRAME_PERCENT: 0.1
+  # 4 или 8 пикселей задействовать для связных областей
+  CON_COMPONENTS_CONNECTIVITY: 8
+
+# Модель вычитания фона
 BG_SUBTRACTION:
+  # Настройки GSOC-модели
   GSOC_MODELS:
+    # сколько положительных результатов должен получить образец,
+    # прежде чем он будет рассматриваться в качестве возможной замены.
     HITS_THRESHOLD: 8192
+    # как быстро будет обновляться быстрая
     REPLACE_RATE_FAST: 0.003
+    # и медленная модели
     REPLACE_RATE_SLOW: 0.0003
+  # параметры для морфологического закрытия
   MORPH_CLOSE:
     KERNEL_SIZE:
       - 5
       - 5
     ITERATIONS: 2
+  # во сколько раз уменьшать изображение прежде чем применять модель
+  # (для лучшей производительности на больших изображениях)
   REDUCE_FRAME_SHAPE_MULTIPLIER: 3
 
+# Unattended Objects Detector
 UOD:
+  # параметры YOLO-детектора
   HUMAN_DETECTION:
     YOLO_MODEL: "n"
     YOLO_CONFIDENCE: 0.25
-  CON_COMPONENTS_CONNECTIVITY: 8
-  # чтобы фильтровать совсем уж маленькие фрагменты
-  AREA_THRESH_FRAME_PERCENT: 0.1
   # граница для сопоставления объектов между кадров по IOU
   IOU_THRESHOLD: 0.2
   # на сколько должна увеличиться площадь контура объекта, чтобы

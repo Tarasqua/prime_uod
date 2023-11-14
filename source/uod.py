@@ -15,7 +15,7 @@ import ultralytics.engine.results
 from ultralytics import YOLO
 
 from config_loader import Config
-from background_subtractor import BackgroundSubtractor
+from tso_detector import TSODetector
 from utils.templates import DetectedObject, UnattendedObject
 from utils.support_functions import iou
 
@@ -36,14 +36,11 @@ class UOD:
         self.roi = roi
         self.remove_people = remove_people  # для отладки или для большей производительности и меньшей точности
         config_ = Config('config.yml')
-        self.bg_subtractor = BackgroundSubtractor(frame_shape, frame_dtype, config_.get('BG_SUBTRACTION'), roi)
+        self.tso_detector = TSODetector(frame_shape, frame_dtype, roi)
         self.yolo_seg = self.__set_yolo_model(config_.get('UOD', 'HUMAN_DETECTION', 'YOLO_MODEL')) \
             if remove_people else None
         self.yolo_conf = config_.get('UOD', 'HUMAN_DETECTION', 'YOLO_CONFIDENCE') \
             if remove_people else None
-        self.area_threshold = (np.prod(np.array(frame_shape[:-1])) *  # % от площади кадра
-                               (config_.get('UOD', 'AREA_THRESH_FRAME_PERCENT') * 0.01))
-        self.con_comp_connectivity = config_.get('UOD', 'CON_COMPONENTS_CONNECTIVITY')
 
         self.detected_objects: List[DetectedObject] = []  # обнаруженные в маске движения предметы
         self.iou_threshold = config_.get('UOD', 'IOU_THRESHOLD')
@@ -76,36 +73,6 @@ class UOD:
         if not os.path.exists(f'{model_path}.onnx'):
             YOLO(model_path).export(format='onnx')
         return YOLO(f'{model_path}.onnx')
-
-    async def __process_area(self, centroid: np.array, stat: np.array) -> np.array:
-        """
-        Обработка связной области, полученной из модели фона:
-            - фильтрация по площади;
-            - переводи из xywh в xyxy;
-            - объединение координат bbox'а и площади контура с координатами центроида.
-        :param centroid: Координаты центроида связной области.
-        :param stat: Координаты bbox'а и площадь связной области.
-        :return: Массив с координатами центроида и bbox'а области + площади контура
-            вида np.array([c_x, c_y, x1, y1, x2, y2, area]).
-        """
-        if stat[-1] < self.area_threshold:
-            return None
-        x, y, w, h, area = stat
-        return np.concatenate([centroid, [x, y, x + w, y + h, area]]).astype(int)
-
-    async def __get_mask_data(self, tso_mask: cv2.typing.MatLike) -> np.array:
-        """
-        Нахождение и фильтрация по площади центроидов и bbox'ов временно статических объектов из маски.
-        :param tso_mask: Маска со временно статическими объектами в ней.
-        :return: Массив вида np.array([[centroid_x, centroid_y, x1, y1, x2, y2], [...], ...])
-        """
-        # находим связные области в маске
-        connected_areas = cv2.connectedComponentsWithStats(tso_mask, self.con_comp_connectivity, cv2.CV_32S)
-        # обрабатываем полученные области и возвращаем их
-        process_area_tasks = [asyncio.create_task(self.__process_area(centroid, stat))
-                              for centroid, stat in zip(connected_areas[3][1:], connected_areas[2][1:])]
-        centroids_bboxes = await asyncio.gather(*process_area_tasks)
-        return np.array([bbox for bbox in centroids_bboxes if bbox is not None])  # фильтруем None
 
     async def __update_detected_object(self, detected_object: DetectedObject, new_obj_data: np.array) -> None:
         """
@@ -166,7 +133,7 @@ class UOD:
             self.unattended_objects.append(
                 UnattendedObject(bbox_coordinates=detected_object.bbox_coordinates,
                                  detection_frame=self.history_frames[0]))
-            # помечаем его как оставленный в списке подозрительных
+            # помечаем его как оставленный в списке обнаруженных
             detected_object.update(unattended=True)
         # обновление счетчика отсутствия (убавляем, если объект не был сопоставлен в текущем кадре)
         if not detected_object.updated:
@@ -278,10 +245,9 @@ class UOD:
         if self.remove_people:
             detections: ultralytics.engine.results = self.yolo_seg.predict(
                 current_frame, classes=[0], verbose=False, conf=self.yolo_conf)[0]
-            tso_mask = await self.bg_subtractor.get_tso_mask(current_frame, detections.masks)
+            mask_data, tso_mask = await self.tso_detector.process_frame(current_frame, detections.masks)
         else:
-            tso_mask = await self.bg_subtractor.get_tso_mask(current_frame, None)
-        mask_data = await self.__get_mask_data(tso_mask)
+            mask_data, tso_mask = await self.tso_detector.process_frame(current_frame, None)
         await self.__match_mask_data(mask_data)
         self.frame = current_frame
         # отрисовываем подозрительные и/или оставленные объекты (временное решение)
