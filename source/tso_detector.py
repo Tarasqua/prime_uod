@@ -14,6 +14,7 @@ from ultralytics.utils import ops
 
 class TSODetector:
     """Обработка кадра, нахождение в нем временно статических объектов."""
+
     def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: list):
         self.frame_shape = frame_shape
         config_ = Config('config.yml')
@@ -47,7 +48,15 @@ class TSODetector:
         mask = ops.scale_image(det_mask, self.frame_shape[::-1])[:, :, 0]
         self.tso_mask[mask == 1] = 0
 
-    async def __process_area(self, centroid: np.array, stat: np.array) -> np.array:
+    async def __remove_unattended(self, uo_mask: np.array) -> None:
+        """
+        По маске с оставленным предметом, вычитает данный предмет из маски со временно статическими объектами.
+        :param uo_mask: Маска с оставленным предметом.
+        :return: None.
+        """
+        self.tso_mask[uo_mask == 255] = 0
+
+    async def __process_area(self, centroid: np.array, stat: np.array, mask: np.array) -> np.array:
         """
         Обработка связной области, полученной из модели фона:
             - фильтрация по площади;
@@ -55,33 +64,47 @@ class TSODetector:
             - объединение координат bbox'а и площади контура с координатами центроида.
         :param centroid: Координаты центроида связной области.
         :param stat: Координаты bbox'а и площадь связной области.
+        :param mask: Бинаризованная маска, где связная область - белая, фон - черный.
         :return: Массив с координатами центроида и bbox'а области + площади контура
             вида np.array([c_x, c_y, x1, y1, x2, y2, area]).
         """
         if stat[-1] < self.area_threshold:
-            return None
+            return None, None
         x, y, w, h, area = stat
-        return np.concatenate([centroid, [x, y, x + w, y + h, area]]).astype(int)
+        return np.concatenate([centroid, [x, y, x + w, y + h, area]]).astype(int), mask
 
-    async def __get_mask_data(self) -> np.array:
+    async def __get_mask_data(self) -> list:
         """
         Нахождение и фильтрация по площади центроидов и bbox'ов временно статических объектов из маски.
-        :return: Массив вида np.array([[centroid_x, centroid_y, x1, y1, x2, y2], [...], ...])
+        :return: List из tuple'ов вида [(np.array(centroid_x, centroid_y, x1, y1, x2, y2), mask), (...), ...]
         """
+
+        async def label_mask(labels_mask, label: int):
+            """Заливаем маски черным в тех местах, где не текущий лейбл,
+            а также заливаем белым в тех, где есть текущий лейбл."""
+            labels_mask[labels_mask != label] = 0
+            labels_mask[labels_mask == label] = 255
+            return labels_mask
+
         # находим связные области в маске
         connected_areas = cv2.connectedComponentsWithStats(self.tso_mask, self.con_comp_connectivity, cv2.CV_32S)
+        # находим маски для каждой найденной связной области
+        masks_tasks = [asyncio.create_task(label_mask(connected_areas[1].copy(), i))
+                       for i in range(1, connected_areas[0])]  # учитываем тот факт, что 0 - это весь кадр
+        masks = await asyncio.gather(*masks_tasks)
         # обрабатываем полученные области и возвращаем их
-        process_area_tasks = [asyncio.create_task(self.__process_area(centroid, stat))
-                              for centroid, stat in zip(connected_areas[3][1:], connected_areas[2][1:])]
-        centroids_bboxes = await asyncio.gather(*process_area_tasks)
-        return np.array([bbox for bbox in centroids_bboxes if bbox is not None])  # фильтруем None
+        process_area_tasks = [asyncio.create_task(self.__process_area(centroid, stat, mask))
+                              for centroid, stat, mask in zip(connected_areas[3][1:], connected_areas[2][1:], masks)]
+        data_masks = await asyncio.gather(*process_area_tasks)
+        return [(data, mask) for data, mask in data_masks if data is not None]  # фильтруем None
 
-    async def process_frame(self, current_frame: np.array, det_masks: Masks or None) -> np.array:
+    async def process_frame(self, current_frame: np.array, det_masks: Masks or None, uo_masks: list or None) -> tuple:
         """
         Обработка изображения, нахождение временно статических объектов в кадре.
         :param current_frame: Текущий кадр последовательности.
         :param det_masks: Маски детекций людей в кадре, полученные с помощью YOLO-детектора.
-        :return: Массив вида np.array([[centroid_x, centroid_y, x1, y1, x2, y2], [...], ...])
+        :param uo_masks: Маски подтвержденных оставленных предметов.
+        :return: List из tuple'ов вида [(np.array(centroid_x, centroid_y, x1, y1, x2, y2), mask), (...), ...]
         """
         # получаем маску со временно статическим объектами
         self.tso_mask = await self.bg_subtractor.get_tso_mask(current_frame)
@@ -92,6 +115,11 @@ class TSODetector:
             remove_person_tasks = [asyncio.create_task(self.__remove_person(mask))
                                    for mask in det_masks.data.numpy()]
             [await task for task in remove_person_tasks]
+        # если есть оставленные, также вычитаем их из маски
+        if uo_masks is not None:
+            remove_uo_tasks = [asyncio.create_task(self.__remove_unattended(uo_mask))
+                               for uo_mask in uo_masks]
+            [await task for task in remove_uo_tasks]
         # находим объекты в маске
         mask_data = await self.__get_mask_data()
         return mask_data, self.tso_mask  # ДЛЯ ОТЛАДКИ возвращаем и маску

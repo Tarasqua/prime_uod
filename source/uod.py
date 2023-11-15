@@ -49,11 +49,11 @@ class UOD:
         self.unattended_objects: List[UnattendedObject] = []  # оставленные предметы
         # сколько кадров должен пролежать предмет для подтверждения того, что он - подозрительный, с учетом
         # времени, потраченного на его обнаружение
-        self.suspicious_frames_timeout = config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') + \
-                                         config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
+        self.suspicious_frames_timeout = (config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
+                                          config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER'))
         # сколько кадров должен пролежать предмет для подтверждения того, что он - оставленный
-        self.unattended_frames_timeout = config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT') + \
-                                         config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
+        self.unattended_frames_timeout = (config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT') +
+                                          config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER'))
         # история кадров
         self.history_frames = deque(maxlen=self.unattended_frames_timeout)
         self.frame = None
@@ -74,34 +74,38 @@ class UOD:
             YOLO(model_path).export(format='onnx')
         return YOLO(f'{model_path}.onnx')
 
-    async def __match_new_object(self, new_object: np.array) -> None:
+    async def __match_new_object(self, new_object_data: np.array, new_object_mask: np.array) -> None:
         """
         Сопоставление нового полученного объекта с уже имеющимися в базе обнаруженных по IOU.
-        :param new_object: Данные по объекту из маски в формате
+        :param new_object_data: Данные по объекту из маски в формате
             np.array([centroid_x, centroid_y, x1, y1, x2, y2, area])
+        :param new_object_mask:
         :return: None.
         """
+
         def update_exciting(exciting_: DetectedObject, new_: np.array) -> None:
             """Обновление уже существующего в базе объекта."""
-            # если площадь увеличилась на n% и n - больше порогового
-            if abs(new_[-1] - exciting_.contour_area) / exciting_.contour_area > self.det_obj_area_threshold:
-                exciting_.update(observation_counter=1, contour_area=new_[-1], bbox_coordinated=new_[2:-1],
-                                 centroid_coordinates=new_[:2], updated=True)
+            # если площадь изменилась на n% и n - больше порогового, а также данный предмет еще не оставленный
+            if abs(new_[0][-1] - exciting_.contour_area) / exciting_.contour_area > self.det_obj_area_threshold \
+                    and not exciting_.unattended:
+                exciting_.update(observation_counter=1, contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
+                                 centroid_coordinates=new_[0][:2], contour_mask=new_[1], updated=True)
             else:
                 exciting_.update(observation_counter=1, updated=True)
 
         # находим iou между текущим новым объектом и теми, что уже были обнаружены
-        new_detected_iou = [(idx, iou(new_object[2:-1], detected_object.bbox_coordinates))
+        new_detected_iou = [(idx, iou(new_object_data[2:-1], detected_object.bbox_coordinates))
                             for idx, detected_object in enumerate(self.detected_objects)]
         # из них находим те, что проходят по порогу
         thresh_filtered_iou = [(idx, v) for idx, v in new_detected_iou if v > self.iou_threshold]
         if thresh_filtered_iou:  # если какой-либо объект прошел по порогу
             max_iou_idx = max(thresh_filtered_iou, key=itemgetter(1))[0]  # индекс объекта, с которым max IOU
-            update_exciting(self.detected_objects[max_iou_idx], new_object)  # обновляем его
+            update_exciting(self.detected_objects[max_iou_idx],
+                            (new_object_data, new_object_mask))  # обновляем его
         else:  # если же ни один по порогу не прошел => это новый объект => добавляем в базу
             self.detected_objects.append(
-                DetectedObject(contour_area=new_object[-1], bbox_coordinates=new_object[2:-1],
-                               centroid_coordinates=new_object[:2])
+                DetectedObject(contour_area=new_object_data[-1], bbox_coordinates=new_object_data[2:-1],
+                               centroid_coordinates=new_object_data[:2])
             )
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
@@ -113,17 +117,19 @@ class UOD:
         """
         if not self.detected_objects:  # если список пустой, добавляем все объекты
             [self.detected_objects.append(
-                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1], centroid_coordinates=data[:2]))
-                for data in mask_data]
+                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1],
+                               centroid_coordinates=data[:2], contour_mask=mask))
+                for data, mask in mask_data]
         else:  # если не пустой
             # и если временно статических объектов в кадре не найдено
-            if mask_data.size == 0:
+            if not mask_data:
                 # выставляем флаг обновления на текущем кадре у всех объектов в базе на False
                 for detected_object in self.detected_objects:
                     detected_object.update(updated=False)
             else:  # если же в кадре есть временно статические объекты
                 # связываем только что полученные с уже имеющимися объектами
-                match_bbox_tasks = [asyncio.create_task(self.__match_new_object(data)) for data in mask_data]
+                match_bbox_tasks = [asyncio.create_task(self.__match_new_object(data, mask))
+                                    for data, mask in mask_data]
                 [await task for task in match_bbox_tasks]
 
     async def __update_detected_objects(self) -> None:
@@ -135,6 +141,7 @@ class UOD:
             (то есть предмета больше в кадре нет).
         :return: None.
         """
+
         async def update_object(detected_object: DetectedObject) -> None:
             """Обновление одного объекта."""
             # проверка по таймауту на подозрительно долгое пребывание в кадре
@@ -144,10 +151,11 @@ class UOD:
                 detected_object.update(suspicious=True)
             if detected_object.observation_counter >= self.unattended_frames_timeout and \
                     not detected_object.unattended:
-                # добавляем в список с оставленными
+                # добавляем в список с оставленными с наследованием id
                 self.unattended_objects.append(
-                    UnattendedObject(bbox_coordinates=detected_object.bbox_coordinates,
-                                     detection_frame=self.history_frames[0]))
+                    UnattendedObject(
+                        object_id=detected_object.object_id, contour_mask=detected_object.contour_mask,
+                        bbox_coordinates=detected_object.bbox_coordinates, detection_frame=self.history_frames[0]))
                 # помечаем его как оставленный в списке обнаруженных
                 detected_object.update(unattended=True)
             # обновление счетчика отсутствия (убавляем, если объект не был сопоставлен в текущем кадре)
@@ -173,6 +181,7 @@ class UOD:
             достаточно быстро и большинство из них не сопоставится, проверяем только подозрительные.
         :return: None.
         """
+
         async def check_pair(obj1: DetectedObject, obj2: DetectedObject) -> DetectedObject:
             """Смотрим, пересекаются ли объекты и возвращаем меньший по площади"""
             if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > 0:
@@ -187,16 +196,43 @@ class UOD:
                     obj1.set_obs_counter(max(obj1.observation_counter, obj2.observation_counter))
                     obj1.set_dis_counter(max(obj1.disappearance_counter, obj2.disappearance_counter))
                     return obj2
+
         # таким образом убираем те объекты
         duplicates_tasks = [asyncio.create_task(check_pair(obj1, obj2)) for obj1, obj2
                             in combinations(self.detected_objects, 2) if obj1.suspicious and obj2.suspicious]
         duplicates = await asyncio.gather(*duplicates_tasks)
         self.detected_objects = [obj for obj in self.detected_objects if obj not in duplicates or not obj.suspicious]
 
+    async def __update_unattended_objects(self) -> list:
+        """
+        Обновление оставленных предметов с возвратом списка масок, с учетом того, что данный
+            оставленный предмет больше не наблюдается в маске временно статических объектов.
+        :return: List из масок оставленных предметов.
+        """
+
+        async def update_object(unattended_object: UnattendedObject) -> np.array or None:
+            """Обновление счетчика с возвратом маски."""
+            # учитываем то, что данный оставленный больше не наблюдается
+            if unattended_object.object_id not in [det_obj.object_id for det_obj in self.detected_objects]:
+                unattended_object.update(fill_black_timeout=1)  # убавляем счетчик
+                return unattended_object.contour_mask  # возвращаем маску
+            else:
+                return None
+
+        # обновляем объекты и складываем маски
+        update_tasks = [asyncio.create_task(update_object(unattended_object))
+                        for unattended_object in self.unattended_objects]
+        unattended_masks = await asyncio.gather(*update_tasks)
+        # фильтруем None
+        unattended_masks = [mask for mask in unattended_masks if mask is not None]
+        # удаляем объекты по таймауту
+        self.unattended_objects = [unattended_object for unattended_object in self.unattended_objects
+                                   if unattended_object.fill_black_timeout != 0]
+        return unattended_masks
+
     async def __plot_bboxes(self) -> None:
         """
         Отрисовка bbox'ов подозрительных или оставленных предметов.
-        :param object_data: Данные по объекту - объект класса DetectedObject.
         :return: None.
         """
 
@@ -221,13 +257,18 @@ class UOD:
         """
         # копим историю кадров
         self.history_frames.append(current_frame)
-        # получаем bbox'ы из модели фона
-        if self.remove_people:
+        # обновялем оставленные и берем маски
+        unattended_masks = await self.__update_unattended_objects() if self.unattended_objects else None
+        # получаем bbox'ы из модели фона и удаляем из маски подтвержденные оставленные предметы, чтобы детекция не
+        # сработала повторно на часть объекта, образовавшегося от распада полного на несколько составляющих
+        if self.remove_people:  # плюс удаляем из маски людей, если это требуется
             detections: ultralytics.engine.results = self.yolo_seg.predict(
                 current_frame, classes=[0], verbose=False, conf=self.yolo_conf)[0]
-            mask_data, tso_mask = await self.tso_detector.process_frame(current_frame, detections.masks)
+            mask_data, tso_mask = await self.tso_detector.process_frame(
+                current_frame, detections.masks, unattended_masks)
         else:
-            mask_data, tso_mask = await self.tso_detector.process_frame(current_frame, None)
+            mask_data, tso_mask = await self.tso_detector.process_frame(
+                current_frame, None, unattended_masks)
         # сопоставляем новые с уже имеющимися
         await self.__match_mask_data(mask_data)
         if self.detected_objects:
@@ -240,8 +281,8 @@ class UOD:
         await self.__plot_bboxes()
         # сохраняем обнаруженные оставленные предметы
         if self.unattended_objects:
-            save_tasks = [asyncio.create_task(save_unattended_object(obj)) for obj in self.unattended_objects]
+            save_tasks = [asyncio.create_task(save_unattended_object(obj))
+                          for obj in self.unattended_objects if not obj.saved]
             [await task for task in save_tasks]
-            self.unattended_objects.clear()
         # return self.frame
         return np.concatenate([self.frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)
