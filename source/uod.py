@@ -211,7 +211,9 @@ class UOD:
         """
 
         async def update_object(unattended_object: UnattendedObject) -> np.array or None:
-            """Обновление счетчика с возвратом маски."""
+            """Обновление счетчика с возвратом маски, а также его сохранение."""
+            if not unattended_object.saved:  # сохраняем, если еще не сохранен
+                await save_unattended_object(unattended_object)
             # учитываем то, что данный оставленный больше не наблюдается
             if unattended_object.object_id not in [det_obj.object_id for det_obj in self.detected_objects]:
                 unattended_object.update(fill_black_timeout=1)  # убавляем счетчик
@@ -279,10 +281,5 @@ class UOD:
         self.frame = current_frame
         # отрисовываем подозрительные и/или оставленные объекты (временное решение)
         await self.__plot_bboxes()
-        # сохраняем обнаруженные оставленные предметы
-        if self.unattended_objects:
-            save_tasks = [asyncio.create_task(save_unattended_object(obj))
-                          for obj in self.unattended_objects if not obj.saved]
-            [await task for task in save_tasks]
         # return self.frame
         return np.concatenate([self.frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)
