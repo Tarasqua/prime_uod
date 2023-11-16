@@ -49,11 +49,12 @@ class UOD:
         self.unattended_objects: List[UnattendedObject] = []  # оставленные предметы
         # сколько кадров должен пролежать предмет для подтверждения того, что он - подозрительный, с учетом
         # времени, потраченного на его обнаружение
-        self.suspicious_frames_timeout = (config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
-                                          config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER'))
+        self.suspicious_frames_timeout = (config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER') +
+                                          config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT'))
         # сколько кадров должен пролежать предмет для подтверждения того, что он - оставленный
-        self.unattended_frames_timeout = (config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT') +
-                                          config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER'))
+        self.unattended_frames_timeout = (config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER') +
+                                          config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
+                                          config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
         # история кадров
         self.history_frames = deque(maxlen=self.unattended_frames_timeout)
         self.frame = None
@@ -89,7 +90,10 @@ class UOD:
             if abs(new_[0][-1] - exciting_.contour_area) / exciting_.contour_area > self.det_obj_area_threshold \
                     and not exciting_.unattended:
                 exciting_.update(observation_counter=1, contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
-                                 centroid_coordinates=new_[0][:2], contour_mask=new_[1], updated=True)
+                                 centroid_coordinates=new_[0][:2], updated=True)
+                # а также начинаем копить маску только после того, как объект станет подозрительным
+                if exciting_.suspicious:
+                    exciting_.update(contour_mask=new_[1])
             else:
                 exciting_.update(observation_counter=1, updated=True)
 
@@ -105,7 +109,7 @@ class UOD:
         else:  # если же ни один по порогу не прошел => это новый объект => добавляем в базу
             self.detected_objects.append(
                 DetectedObject(contour_area=new_object_data[-1], bbox_coordinates=new_object_data[2:-1],
-                               centroid_coordinates=new_object_data[:2])
+                               contour_mask=new_object_mask)
             )
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
@@ -117,8 +121,7 @@ class UOD:
         """
         if not self.detected_objects:  # если список пустой, добавляем все объекты
             [self.detected_objects.append(
-                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1],
-                               centroid_coordinates=data[:2], contour_mask=mask))
+                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1], contour_mask=mask))
                 for data, mask in mask_data]
         else:  # если не пустой
             # и если временно статических объектов в кадре не найдено

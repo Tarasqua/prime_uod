@@ -1,5 +1,7 @@
 from collections import deque
 from uuid import UUID, uuid4
+
+import cv2
 from pydantic import BaseModel, Field
 import numpy as np
 
@@ -31,7 +33,7 @@ class DetectedObject(BaseModel):
     contour_area: int = 0
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
-    centroid_coordinates: np.array = Field(default_factory=lambda: np.zeros(2))
+    centroid_coordinates: deque = deque(maxlen=150)
     updated: bool = False
     suspicious: bool = False
     unattended: bool = False
@@ -55,11 +57,12 @@ class DetectedObject(BaseModel):
                 case 'contour_area':
                     self.contour_area = value
                 case 'contour_mask':
-                    self.contour_mask = value
+                    # добавляем к текущему контуру новый
+                    self.contour_mask = cv2.bitwise_or(self.contour_mask, value)
                 case 'bbox_coordinated':
                     self.bbox_coordinates = value
                 case 'centroid_coordinates':
-                    self.centroid_coordinates = value
+                    self.centroid_coordinates.append(value)
                 case 'updated':
                     self.updated = value
                 case 'suspicious':
@@ -103,8 +106,9 @@ class UnattendedObject(BaseModel):
     detection_frame: np.array = np.array([])
     saved: bool = False
     # по дефолту ставим таймаут равным времени, нужному на появление + на подтверждение "оставленности" предмета
-    fill_black_timeout: int = (__config.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT') +
-                               __config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER'))
+    fill_black_timeout: int = (__config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER') +
+                               __config.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
+                               __config.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
 
     class Config:
         """Для того чтобы была возможность объявлять поля как numpy array."""
