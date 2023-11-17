@@ -31,9 +31,15 @@ async def save_unattended_object(obj: UnattendedObject) -> None:
     :param obj: Оставленный объект - объект класса UnattendedObject.
     :return: None.
     """
-    x1, y1, x2, y2 = obj.bbox_coordinates
-    cv2.rectangle(obj.detection_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+    # создаем новую папку для сохранения кадров
     detections_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'uod_detections')
-    im_path = os.path.join(detections_path, f'{len(os.listdir(detections_path)) + 1}.png')
-    cv2.imwrite(im_path, obj.detection_frame)
-    obj.update(saved=True)  # выставляем флаг, что объект сохранен
+    directory = os.path.join(detections_path, str(len(os.listdir(detections_path)) + 1))
+    if not os.path.exists(directory):
+        os.mkdir(directory)
+    # сохраняем кадры в папку
+    x1, y1, x2, y2 = obj.bbox_coordinates
+    for frame in obj.leaving_frames:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.imwrite(os.path.join(directory, f'{len(os.listdir(directory)) + 1}.png'), frame)
+    # выставляем флаг, что объект сохранен
+    obj.update(saved=True)

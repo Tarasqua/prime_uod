@@ -1,5 +1,6 @@
 from collections import deque
 from uuid import UUID, uuid4
+from typing import List
 
 import cv2
 from pydantic import BaseModel, Field
@@ -16,6 +17,8 @@ class DetectedObject(BaseModel):
     :param object_id: Уникальный id объекта.
     :param observation_counter: Счетчик кадров наблюдения за объектом.
     :param disappearance_counter: Счетчик кадров отсутствия объекта.
+    :param leaving_frames: История кадров оставления предмета.
+        Как только объект появился - записываем историю его появления.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
     :param contour_area: Площадь контура объекта, взятая из маски временно статических объектов.
     :param bbox_coordinates: Координаты bbox'а объекта.
@@ -30,10 +33,11 @@ class DetectedObject(BaseModel):
     object_id: UUID = Field(default_factory=uuid4)
     observation_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
     disappearance_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
+    leaving_frames: List[np.array] = []
     contour_area: int = 0
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
-    centroid_coordinates: deque = deque(maxlen=150)
+    centroid_coordinates: deque = deque(maxlen=300)
     updated: bool = False
     suspicious: bool = False
     unattended: bool = False
@@ -91,9 +95,10 @@ class UnattendedObject(BaseModel):
     """
     Структура данных для выявленных оставленных предметов.
     :param object_id: Уникальный id объекта.
+    :param leaving_frames: История кадров оставления предмета.
+        Как только объект появился - записываем историю его появления.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
     :param bbox_coordinates: Координаты bbox'а объекта.
-    :param detection_frame: Кадр, когда объект был впервые обнаружен.
     :param saved: Флаг, отвечающий за то, сохранен ли данный предмет в базу или нет
         (для того, чтобы продолжать заливать маску, но не сохранять больше 1 раза).
     :param fill_black_timeout: Таймаут заливки сегмента черным в маске со временно стат объектами.
@@ -101,9 +106,9 @@ class UnattendedObject(BaseModel):
     __config = Config('config.yml')
 
     object_id: UUID = Field(default_factory=uuid4)
+    leaving_frames: List[np.array] = []
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
-    detection_frame: np.array = np.array([])
     saved: bool = False
     # по дефолту ставим таймаут равным времени, нужному на появление + на подтверждение "оставленности" предмета
     fill_black_timeout: int = (__config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER') +

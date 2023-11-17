@@ -46,6 +46,6 @@ DETECTED_OBJECT:
   # ВРЕМЕННОЕ РЕШЕНИЕ
   # количество кадров, прошедшее с момента фактического появления
   # в кадре до момента появления в маске
-  DEFAULT_OBSERVATION_COUNTER: 150
+  DEFAULT_OBSERVATION_COUNTER: 50
   # количество кадров, которое должно пройти, чтобы забыть объект
   DEFAULT_DISAPPEARANCE_COUNTER: 60

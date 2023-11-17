@@ -55,8 +55,8 @@ class UOD:
         self.unattended_frames_timeout = (config_.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER') +
                                           config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
                                           config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
-        # история кадров
-        self.history_frames = deque(maxlen=self.unattended_frames_timeout)
+        # храним 150 последних кадров
+        self.history_frames = deque(maxlen=150)
         self.frame = None
 
     @staticmethod
@@ -95,7 +95,7 @@ class UOD:
                 if exciting_.suspicious:
                     exciting_.update(contour_mask=new_[1])
             else:
-                exciting_.update(observation_counter=1, updated=True)
+                exciting_.update(observation_counter=1, centroid_coordinates=new_[0][:2], updated=True)
 
         # находим iou между текущим новым объектом и теми, что уже были обнаружены
         new_detected_iou = [(idx, iou(new_object_data[2:-1], detected_object.bbox_coordinates))
@@ -109,7 +109,7 @@ class UOD:
         else:  # если же ни один по порогу не прошел => это новый объект => добавляем в базу
             self.detected_objects.append(
                 DetectedObject(contour_area=new_object_data[-1], bbox_coordinates=new_object_data[2:-1],
-                               contour_mask=new_object_mask)
+                               contour_mask=new_object_mask, leaving_frames=list(self.history_frames)[::15])
             )
 
     async def __match_mask_data(self, mask_data: np.array) -> None:
@@ -121,7 +121,8 @@ class UOD:
         """
         if not self.detected_objects:  # если список пустой, добавляем все объекты
             [self.detected_objects.append(
-                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1], contour_mask=mask))
+                DetectedObject(contour_area=data[-1], bbox_coordinates=data[2:-1],
+                               contour_mask=mask, leaving_frames=list(self.history_frames)[::15]))
                 for data, mask in mask_data]
         else:  # если не пустой
             # и если временно статических объектов в кадре не найдено
@@ -145,6 +146,16 @@ class UOD:
         :return: None.
         """
 
+        def check_centroid_stat(centroids: np.array) -> bool:
+            """
+            Проверка устойчивости координат центроида:
+                с помощью polyfit смотрим, какой угол наклона у линейной функции,
+                полученной из координат центроида => отсеиваем по порогу.
+            """
+            centroids = np.array(centroids)
+            k, _ = np.polyfit(centroids[:, 0], centroids[:, 1], 1)
+            return np.abs(np.degrees(np.arctan(k))) > 30
+
         async def update_object(detected_object: DetectedObject) -> None:
             """Обновление одного объекта."""
             # проверка по таймауту на подозрительно долгое пребывание в кадре
@@ -154,13 +165,19 @@ class UOD:
                 detected_object.update(suspicious=True)
             if detected_object.observation_counter >= self.unattended_frames_timeout and \
                     not detected_object.unattended:
-                # добавляем в список с оставленными с наследованием id
-                self.unattended_objects.append(
-                    UnattendedObject(
-                        object_id=detected_object.object_id, contour_mask=detected_object.contour_mask,
-                        bbox_coordinates=detected_object.bbox_coordinates, detection_frame=self.history_frames[0]))
-                # помечаем его как оставленный в списке обнаруженных
-                detected_object.update(unattended=True)
+                # делаем проверку на устойчивость координат центроида
+                if check_centroid_stat(detected_object.centroid_coordinates):
+                    # добавляем в список с оставленными с наследованием id
+                    self.unattended_objects.append(
+                        UnattendedObject(
+                            object_id=detected_object.object_id, contour_mask=detected_object.contour_mask,
+                            bbox_coordinates=detected_object.bbox_coordinates,
+                            leaving_frames=detected_object.leaving_frames))
+                    # помечаем его как оставленный в списке обнаруженных
+                    detected_object.update(unattended=True)
+                else:
+                    # иначе ставим счетчик отсутствия в ноль, чтобы удалить предмет
+                    detected_object.set_dis_counter(0)
             # обновление счетчика отсутствия (убавляем, если объект не был сопоставлен в текущем кадре)
             if not detected_object.updated:
                 detected_object.update(disappearance_counter=1)
