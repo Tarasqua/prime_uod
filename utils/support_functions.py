@@ -1,6 +1,8 @@
 """
 Вспомогательные функции
 """
+import time
+import datetime
 import os
 from pathlib import Path
 
@@ -33,7 +35,8 @@ async def save_unattended_object(obj: UnattendedObject) -> None:
     """
     # создаем новую папку для сохранения кадров
     detections_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'uod_detections')
-    directory = os.path.join(detections_path, str(len(os.listdir(detections_path)) + 1))
+    directory = os.path.join(detections_path,
+                             datetime.datetime.fromtimestamp(obj.detection_timestamp).strftime("%B %d, %H:%M:%S"))
     if not os.path.exists(directory):
         os.mkdir(directory)
     # сохраняем кадры в папку

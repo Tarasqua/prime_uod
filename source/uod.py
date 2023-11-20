@@ -2,6 +2,7 @@
 @tarasqua
 """
 import os
+import time
 from pathlib import Path
 import asyncio
 from typing import List
@@ -25,7 +26,8 @@ class UOD:
     Unattended Object Detector
     """
 
-    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: list, remove_people: bool = True):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: list,
+                 stream_fps: int, remove_people: bool = True):
         """
         Детектор оставленных предметов.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
@@ -49,11 +51,11 @@ class UOD:
         self.unattended_objects: List[UnattendedObject] = []  # оставленные предметы
         # сколько кадров должен пролежать предмет для подтверждения того, что он - подозрительный, с учетом
         # времени, потраченного на его обнаружение
-        self.suspicious_frames_timeout = config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT')
+        self.suspicious_timeout = config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT')
         # сколько кадров должен пролежать предмет для подтверждения того, что он - оставленный
-        self.unattended_frames_timeout = (config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
-                                          config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
-        self.history_frames = deque(maxlen=config_.get('UOD', 'HISTORY_ACCUMULATION_TIME'))
+        self.unattended_timeout = (config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
+                                   config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
+        self.history_frames = deque(maxlen=int(config_.get('UOD', 'HISTORY_ACCUMULATION_TIME') * stream_fps))
         self.frames_to_save = config_.get('UOD', 'FRAMES_TO_SAVE_NUMBER')
         self.frame = None
 
@@ -87,13 +89,13 @@ class UOD:
             # если площадь изменилась на n% и n - больше порогового, а также данный предмет еще не оставленный
             if abs(new_[0][-1] - exciting_.contour_area) / exciting_.contour_area > self.det_obj_area_threshold \
                     and not exciting_.unattended:
-                exciting_.update(observation_counter=1, contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
+                exciting_.update(contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
                                  centroid_coordinates=new_[0][:2], updated=True)
                 # а также начинаем копить маску только после того, как объект станет подозрительным
                 if exciting_.suspicious:
                     exciting_.update(contour_mask=new_[1])
             else:
-                exciting_.update(observation_counter=1, centroid_coordinates=new_[0][:2], updated=True)
+                exciting_.update(centroid_coordinates=new_[0][:2], updated=True)
 
         # находим iou между текущим новым объектом и теми, что уже были обнаружены
         new_detected_iou = [(idx, iou(new_object_data[2:-1], detected_object.bbox_coordinates))
@@ -150,18 +152,21 @@ class UOD:
         async def update_object(detected_object: DetectedObject) -> None:
             """Обновление одного объекта."""
             # проверка по таймауту на подозрительно долгое пребывание в кадре
-            if detected_object.observation_counter >= self.suspicious_frames_timeout and \
+            obs_time = time.time() - detected_object.detection_timestamp
+            if obs_time >= self.suspicious_timeout and \
                     not detected_object.suspicious:
                 # помечаем его как подозрительный
                 detected_object.update(suspicious=True)
-            if detected_object.observation_counter >= self.unattended_frames_timeout and \
+            elif obs_time >= self.unattended_timeout and \
                     not detected_object.unattended:
                 # добавляем в список с оставленными с наследованием id
                 self.unattended_objects.append(
                     UnattendedObject(
                         object_id=detected_object.object_id, contour_mask=detected_object.contour_mask,
                         bbox_coordinates=detected_object.bbox_coordinates,
-                        leaving_frames=detected_object.leaving_frames))
+                        leaving_frames=detected_object.leaving_frames,
+                        detection_timestamp=detected_object.detection_timestamp
+                    ))
                 # помечаем его как оставленный в списке обнаруженных
                 detected_object.update(unattended=True)
             # обновление счетчика отсутствия (убавляем, если объект не был сопоставлен в текущем кадре)
@@ -191,22 +196,23 @@ class UOD:
         async def check_pair(obj1: DetectedObject, obj2: DetectedObject) -> DetectedObject:
             """Смотрим, пересекаются ли объекты и возвращаем меньший по площади"""
             if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > 0:
-                max_obs = max(obj1.observation_counter, obj2.observation_counter)
+                # находим раннее время обнаружения
+                min_det_timestamp = min(obj1.detection_timestamp, obj2.detection_timestamp)
                 # берем меньший по площади - его и отфильтруем далее
                 if obj1.contour_area < obj2.contour_area:
-                    # а большему присваиваем большие значения по счетчикам времени наблюдения и отсутствия, так как
+                    # большему присваиваем раннее время наблюдения, больший счетчик отсутствия, так как
                     # это один и тот же объект и в процессе проявления он мог пропадать и появляться снова и снова
-                    obj2.set_obs_counter(max_obs)
+                    obj2.set_det_timestamp(min_det_timestamp)
                     obj2.set_dis_counter(max(obj1.disappearance_counter, obj2.disappearance_counter))
                     # а также переприсваиваем кадры оставления
                     obj2.set_leaving_frames(
-                        obj1.leaving_frames if obj1.observation_counter == max_obs else obj2.leaving_frames)
+                        obj1.leaving_frames if obj1.detection_timestamp == min_det_timestamp else obj2.leaving_frames)
                     return obj1
                 else:
-                    obj1.set_obs_counter(max_obs)
+                    obj1.set_det_timestamp(min_det_timestamp)
                     obj1.set_dis_counter(max(obj1.disappearance_counter, obj2.disappearance_counter))
                     obj1.set_leaving_frames(
-                        obj1.leaving_frames if obj1.observation_counter == max_obs else obj2.leaving_frames)
+                        obj1.leaving_frames if obj1.detection_timestamp == min_det_timestamp else obj2.leaving_frames)
                     return obj2
 
         # таким образом убираем те объекты

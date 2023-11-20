@@ -1,3 +1,4 @@
+import time
 from collections import deque
 from uuid import UUID, uuid4
 from typing import List
@@ -15,7 +16,7 @@ class DetectedObject(BaseModel):
         площади. Данный предмет имеет два флага - подозрительный и оставленный предмет,
         которые меняют свое состояние в зависимости от времени нахождения в кадре.
     :param object_id: Уникальный id объекта.
-    :param observation_counter: Счетчик кадров наблюдения за объектом.
+    :param detection_timestamp: Timestamp обнаружения объекта в маске.
     :param disappearance_counter: Счетчик кадров отсутствия объекта.
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
@@ -31,7 +32,7 @@ class DetectedObject(BaseModel):
     __config = Config('config.yml')
 
     object_id: UUID = Field(default_factory=uuid4)
-    observation_counter: int = 0
+    detection_timestamp: time = Field(default_factory=lambda: time.time())
     disappearance_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
     leaving_frames: List[np.array] = []
     contour_area: int = 0
@@ -54,8 +55,6 @@ class DetectedObject(BaseModel):
         """
         for field, value in new_data.items():
             match field:
-                case 'observation_counter':
-                    self.observation_counter += value
                 case 'disappearance_counter':
                     self.disappearance_counter -= value
                 case 'contour_area':
@@ -82,13 +81,13 @@ class DetectedObject(BaseModel):
         """
         self.disappearance_counter = value
 
-    def set_obs_counter(self, value) -> None:
+    def set_det_timestamp(self, value) -> None:
         """
-        Выставление конкретного значения на счетчик наблюдения.
+        Выставление конкретного значения на время обнаружения.
         :param value: Интовое значение.
         :return: None.
         """
-        self.observation_counter = value
+        self.detection_timestamp = value
 
     def set_leaving_frames(self, value: list) -> None:
         """
@@ -103,6 +102,7 @@ class UnattendedObject(BaseModel):
     """
     Структура данных для выявленных оставленных предметов.
     :param object_id: Уникальный id объекта.
+    :param detection_timestamp: Timestamp обнаружения объекта в маске.
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
@@ -114,6 +114,7 @@ class UnattendedObject(BaseModel):
     __config = Config('config.yml')
 
     object_id: UUID = Field(default_factory=uuid4)
+    detection_timestamp: time = Field(default_factory=lambda: time.time())
     leaving_frames: List[np.array] = []
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))

@@ -27,10 +27,11 @@ class Main:
     async def main(self):
         """Временная имплементация"""
         cap = cv2.VideoCapture(self.stream_source)
+        fps = cap.get(cv2.CAP_PROP_FPS)
         _, frame = cap.read()
         assert frame is not None, "Couldn't open stream source"
         roi = ROIPolygon().get_roi(frame)
-        uod = UOD(frame.shape, frame.dtype, roi, False)
+        uod = UOD(frame.shape, frame.dtype, roi, int(fps), False)
         # demo = self.__get_demo('demo_uod.mp4', (1440, 576))
         cv2.namedWindow('foreground')
         cv2.setMouseCallback('foreground', self.__check_click)
