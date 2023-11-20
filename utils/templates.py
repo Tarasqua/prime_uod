@@ -31,13 +31,13 @@ class DetectedObject(BaseModel):
     __config = Config('config.yml')
 
     object_id: UUID = Field(default_factory=uuid4)
-    observation_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER')
+    observation_counter: int = 0
     disappearance_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
     leaving_frames: List[np.array] = []
     contour_area: int = 0
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
-    centroid_coordinates: deque = deque(maxlen=300)
+    centroid_coordinates: deque = deque(maxlen=1)
     updated: bool = False
     suspicious: bool = False
     unattended: bool = False
@@ -82,13 +82,21 @@ class DetectedObject(BaseModel):
         """
         self.disappearance_counter = value
 
-    def set_obs_counter(self, value):
+    def set_obs_counter(self, value) -> None:
         """
         Выставление конкретного значения на счетчик наблюдения.
         :param value: Интовое значение.
         :return: None.
         """
         self.observation_counter = value
+
+    def set_leaving_frames(self, value: list) -> None:
+        """
+        Выставление конкретного значения на историю кадров оставления.
+        :param value: Последовательность кадров.
+        :return: None.
+        """
+        self.leaving_frames = value
 
 
 class UnattendedObject(BaseModel):
@@ -111,9 +119,8 @@ class UnattendedObject(BaseModel):
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     saved: bool = False
     # по дефолту ставим таймаут равным времени, нужному на появление + на подтверждение "оставленности" предмета
-    fill_black_timeout: int = (__config.get('DETECTED_OBJECT', 'DEFAULT_OBSERVATION_COUNTER') +
-                               __config.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
-                               __config.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
+    fill_black_timeout: int = (__config.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
+                               __config.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT')) * 2
 
     class Config:
         """Для того чтобы была возможность объявлять поля как numpy array."""

@@ -11,11 +11,11 @@ BG_SUBTRACTION:
   GSOC_MODELS:
     # сколько положительных результатов должен получить образец,
     # прежде чем он будет рассматриваться в качестве возможной замены.
-    HITS_THRESHOLD: 8192
+    HITS_THRESHOLD: 4096
     # как быстро будет обновляться быстрая
     REPLACE_RATE_FAST: 0.003
     # и медленная модели
-    REPLACE_RATE_SLOW: 0.0003
+    REPLACE_RATE_SLOW: 0.00003
   # параметры для морфологического закрытия
   MORPH_CLOSE:
     KERNEL_SIZE:
@@ -38,14 +38,15 @@ UOD:
   # изменить координаты рамки, в %
   DETECTED_OBJ_AREA_THRESHOLD: 2
   # через сколько кадров обнаруженный становится подозрительным
-  DETECTED_TO_SUSPICIOUS_TIMEOUT: 300
+  DETECTED_TO_SUSPICIOUS_TIMEOUT: 450
   # через сколько кадров подозрительный становится унесенным
   SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 150
+  # сколько кадров хранить в истории
+  HISTORY_ACCUMULATION_TIME: 300
+  # сколько кадров сохранить
+  FRAMES_TO_SAVE_NUMBER: 10
 
 DETECTED_OBJECT:
   # ВРЕМЕННОЕ РЕШЕНИЕ
-  # количество кадров, прошедшее с момента фактического появления
-  # в кадре до момента появления в маске
-  DEFAULT_OBSERVATION_COUNTER: 50
   # количество кадров, которое должно пройти, чтобы забыть объект
-  DEFAULT_DISAPPEARANCE_COUNTER: 60
+  DEFAULT_DISAPPEARANCE_COUNTER: 300

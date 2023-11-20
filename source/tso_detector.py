@@ -35,7 +35,9 @@ class TSODetector:
         :return: Маска, залитая белым внутри ROI и черным - во вне.
         """
         stencil = np.zeros(frame_shape).astype(frame_dtype)
-        cv2.fillPoly(stencil, roi, (255, 255, 255))
+        [cv2.bitwise_or(stencil, s)  # применяем каждый полигон к маске
+         for s in [cv2.fillPoly(stencil, [r], (255, 255, 255))
+                   for r in roi]]
         return stencil
 
     async def __remove_person(self, det_mask: np.array) -> None:
