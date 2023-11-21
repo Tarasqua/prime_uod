@@ -103,6 +103,7 @@ class UnattendedObject(BaseModel):
     Структура данных для выявленных оставленных предметов.
     :param object_id: Уникальный id объекта.
     :param detection_timestamp: Timestamp обнаружения объекта в маске.
+    :param obs_loss_timestamp: Timestamp потери объекта в маске.
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
@@ -115,13 +116,11 @@ class UnattendedObject(BaseModel):
 
     object_id: UUID = Field(default_factory=uuid4)
     detection_timestamp: time = Field(default_factory=lambda: time.time())
+    obs_loss_timestamp: time = float('inf')
     leaving_frames: List[np.array] = []
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     saved: bool = False
-    # по дефолту ставим таймаут равным времени, нужному на появление + на подтверждение "оставленности" предмета
-    fill_black_timeout: int = (__config.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
-                               __config.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT')) * 2
 
     class Config:
         """Для того чтобы была возможность объявлять поля как numpy array."""
@@ -137,5 +136,5 @@ class UnattendedObject(BaseModel):
             match field:
                 case 'saved':
                     self.saved = value
-                case 'fill_black_timeout':
-                    self.fill_black_timeout -= value
+                case 'obs_loss_timestamp':
+                    self.obs_loss_timestamp = value

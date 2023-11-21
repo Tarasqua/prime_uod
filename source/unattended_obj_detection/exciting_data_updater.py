@@ -14,6 +14,8 @@ class DataUpdater:
     def __init__(self, suspicious_timeout: int, unattended_timeout: int):
         self.suspicious_timeout = suspicious_timeout
         self.unattended_timeout = unattended_timeout
+        # время, которое сегмент оставленного предмета будет заливаться черным в маске после его исчезновения
+        self.fill_unattended_cont_timeout = suspicious_timeout + unattended_timeout
 
     async def update_detected_objects(
             self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject]) -> (
@@ -99,9 +101,8 @@ class DataUpdater:
         duplicates = await asyncio.gather(*duplicates_tasks)
         return [obj for obj in detected_objects if obj not in duplicates or not obj.suspicious]
 
-    @staticmethod
     async def update_unattended_objects(
-            detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject]) -> (
+            self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject]) -> (
             tuple[list[UnattendedObject], list[np.array] or []]):
         """
         Обновление оставленных предметов с возвратом списка масок, с учетом того, что данный
@@ -116,7 +117,7 @@ class DataUpdater:
                 await save_unattended_object(unattended_object)
             # учитываем то, что данный оставленный больше не наблюдается
             if unattended_object.object_id not in [det_obj.object_id for det_obj in detected_objects]:
-                unattended_object.update(fill_black_timeout=1)  # убавляем счетчик
+                unattended_object.update(obs_loss_timestamp=time.time())
                 return unattended_object.contour_mask  # возвращаем маску
             else:
                 return None
@@ -128,6 +129,7 @@ class DataUpdater:
         # фильтруем None
         unattended_masks = [mask for mask in unattended_masks if mask is not None]
         # удаляем объекты по таймауту
-        unattended_objects = [unattended_object for unattended_object in unattended_objects
-                              if unattended_object.fill_black_timeout != 0]
+        current_time = time.time()
+        unattended_objects = [unattended_object for unattended_object in unattended_objects if
+                              current_time - unattended_object.obs_loss_timestamp < self.fill_unattended_cont_timeout]
         return unattended_objects, unattended_masks
