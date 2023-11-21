@@ -5,7 +5,7 @@ from tkinter import filedialog
 import cv2
 
 from utils.roi_polygon import ROIPolygon
-from uod import UOD
+from source.unattended_obj_detection.uod import UOD
 
 
 class Main:

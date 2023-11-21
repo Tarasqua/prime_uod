@@ -6,8 +6,8 @@ import asyncio
 import cv2
 import numpy as np
 
-from background_subtractor import BackgroundSubtractor
-from config_loader import Config
+from source.temp_stat_obj_detection.background_subtractor import BackgroundSubtractor
+from source.config_loader import Config
 from ultralytics.engine.results import Masks
 from ultralytics.utils import ops
 

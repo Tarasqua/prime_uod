@@ -40,7 +40,7 @@ UOD:
   # через сколько секунд обнаруженный становится подозрительным
   DETECTED_TO_SUSPICIOUS_TIMEOUT: 15
   # через сколько секунд подозрительный становится унесенным
-  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 5
+  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 15
   # сколько секунд истории хранить
   HISTORY_ACCUMULATION_TIME: 5
   # сколько кадров сохранить
