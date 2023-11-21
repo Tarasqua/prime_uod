@@ -17,7 +17,8 @@ class DetectedObject(BaseModel):
         которые меняют свое состояние в зависимости от времени нахождения в кадре.
     :param object_id: Уникальный id объекта.
     :param detection_timestamp: Timestamp обнаружения объекта в маске.
-    :param disappearance_counter: Счетчик кадров отсутствия объекта.
+    :param last_seen_timestamp: Timestamp последнего обнаружения объекта в маске
+        (для того, чтобы отслеживать исчезновение из маски).
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
@@ -33,7 +34,7 @@ class DetectedObject(BaseModel):
 
     object_id: UUID = Field(default_factory=uuid4)
     detection_timestamp: time = Field(default_factory=lambda: time.time())
-    disappearance_counter: int = __config.get('DETECTED_OBJECT', 'DEFAULT_DISAPPEARANCE_COUNTER')
+    last_seen_timestamp: time = Field(default_factory=lambda: time.time())
     leaving_frames: List[np.array] = []
     contour_area: int = 0
     contour_mask: np.array = np.array([])
@@ -55,8 +56,8 @@ class DetectedObject(BaseModel):
         """
         for field, value in new_data.items():
             match field:
-                case 'disappearance_counter':
-                    self.disappearance_counter -= value
+                case 'last_seen_timestamp':
+                    self.last_seen_timestamp = value
                 case 'contour_area':
                     self.contour_area = value
                 case 'contour_mask':
@@ -72,14 +73,6 @@ class DetectedObject(BaseModel):
                     self.suspicious = value
                 case 'unattended':
                     self.unattended = value
-
-    def set_dis_counter(self, value: int) -> None:
-        """
-        Выставление конкретного значения на счетчик отсутствия.
-        :param value: Интовое значение.
-        :return: None.
-        """
-        self.disappearance_counter = value
 
     def set_det_timestamp(self, value) -> None:
         """
@@ -110,7 +103,6 @@ class UnattendedObject(BaseModel):
     :param bbox_coordinates: Координаты bbox'а объекта.
     :param saved: Флаг, отвечающий за то, сохранен ли данный предмет в базу или нет
         (для того, чтобы продолжать заливать маску, но не сохранять больше 1 раза).
-    :param fill_black_timeout: Таймаут заливки сегмента черным в маске со временно стат объектами.
     """
     __config = Config('config.yml')
 

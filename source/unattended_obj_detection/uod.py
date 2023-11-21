@@ -41,7 +41,8 @@ class UOD:
         self.data_updater = DataUpdater(
             config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT'),
             (config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT') +
-             config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT'))
+             config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT')),
+            config_.get('UOD', 'DISAPPEARANCE_TIMEOUT')
         )
         self.yolo_seg = set_yolo_model(config_.get('UOD', 'HUMAN_DETECTION', 'YOLO_MODEL')) \
             if remove_people else None

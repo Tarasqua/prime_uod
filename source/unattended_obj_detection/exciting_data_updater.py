@@ -11,15 +11,16 @@ from utils.templates import DetectedObject, UnattendedObject
 class DataUpdater:
     """Вспомогательный класс для обновления данных в базах обнаруженных и оставленных объектов."""
 
-    def __init__(self, suspicious_timeout: int, unattended_timeout: int):
+    def __init__(self, suspicious_timeout: int, unattended_timeout: int, disappearance_timeout: int):
         self.suspicious_timeout = suspicious_timeout
         self.unattended_timeout = unattended_timeout
+        self.disappearance_timeout = disappearance_timeout
         # время, которое сегмент оставленного предмета будет заливаться черным в маске после его исчезновения
         self.fill_unattended_cont_timeout = suspicious_timeout + unattended_timeout
 
     async def update_detected_objects(
             self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject]) -> (
-            tuple)[list[DetectedObject], list[UnattendedObject]]:
+            tuple)[list[DetectedObject] or [], list[UnattendedObject]]:
         """
         Проверяем по таймауту время наблюдения за обнаруженными объектами и, в случае
             прохождения проверки, в зависимости от времени наблюдения, помечаем объект как
@@ -29,10 +30,10 @@ class DataUpdater:
         :return: Tuple из списков обнаруженных и оставленных предметов.
         """
 
-        async def update_object(detected_object: DetectedObject) -> None:
+        async def update_object(detected_object: DetectedObject, current_time: float) -> DetectedObject:
             """Обновление одного объекта."""
             # проверка по таймауту на подозрительно долгое пребывание в кадре
-            obs_time = time.time() - detected_object.detection_timestamp
+            obs_time = current_time - detected_object.detection_timestamp
             if obs_time >= self.suspicious_timeout and not detected_object.suspicious:
                 # помечаем его как подозрительный
                 detected_object.update(suspicious=True)
@@ -47,20 +48,22 @@ class DataUpdater:
                     ))
                 # помечаем его как оставленный в списке обнаруженных
                 detected_object.update(unattended=True)
-            # обновление счетчика отсутствия (убавляем, если объект не был сопоставлен в текущем кадре)
+            # смотрим, что объект не был сопоставлен в текущем кадре
             if not detected_object.updated:
-                detected_object.update(disappearance_counter=1)
+                # + проверка по таймауту отсутствия => если предмет ее не проходит, он отфильтровывается
+                if current_time - detected_object.last_seen_timestamp < self.disappearance_timeout:
+                    return detected_object
             else:
-                # если же объект был сопоставлен в текущем кадре, меняем флаг на False для следующего кадра
-                detected_object.update(updated=False)
+                detected_object.update(updated=False)  # меняем флаг на False для следующего кадра
+                return detected_object
 
+        cur_time = time.time()
         # проверяем и обновляем обнаруженные
-        check_detected_tasks = [asyncio.create_task(update_object(detected_object))
-                                for detected_object in detected_objects]
-        [await task for task in check_detected_tasks]
-        # удаляем унесенные объекты
-        detected_objects = [detected_object for detected_object in detected_objects
-                            if detected_object.disappearance_counter != 0]
+        update_detected_tasks = [asyncio.create_task(update_object(detected_object, cur_time))
+                                 for detected_object in detected_objects]
+        detected_objects = await asyncio.gather(*update_detected_tasks)
+        # фильтруем None
+        detected_objects = [detected_object for detected_object in detected_objects if detected_object is not None]
         return detected_objects, unattended_objects
 
     @staticmethod
@@ -80,22 +83,19 @@ class DataUpdater:
                 min_det_timestamp = min(obj1.detection_timestamp, obj2.detection_timestamp)
                 # берем меньший по площади - его и отфильтруем далее
                 if obj1.contour_area < obj2.contour_area:
-                    # большему присваиваем раннее время наблюдения, больший счетчик отсутствия, так как
+                    # большему присваиваем раннее время наблюдения и переприсваиваем кадры оставления, так как
                     # это один и тот же объект и в процессе проявления он мог пропадать и появляться снова и снова
                     obj2.set_det_timestamp(min_det_timestamp)
-                    obj2.set_dis_counter(max(obj1.disappearance_counter, obj2.disappearance_counter))
-                    # а также переприсваиваем кадры оставления
                     obj2.set_leaving_frames(
                         obj1.leaving_frames if obj1.detection_timestamp == min_det_timestamp else obj2.leaving_frames)
                     return obj1
                 else:
                     obj1.set_det_timestamp(min_det_timestamp)
-                    obj1.set_dis_counter(max(obj1.disappearance_counter, obj2.disappearance_counter))
                     obj1.set_leaving_frames(
                         obj1.leaving_frames if obj1.detection_timestamp == min_det_timestamp else obj2.leaving_frames)
                     return obj2
 
-        # таким образом убираем те объекты
+        # таким образом убираем те объекты, которые задублировались и их площадь меньше
         duplicates_tasks = [asyncio.create_task(check_pair(obj1, obj2)) for obj1, obj2
                             in combinations(detected_objects, 2) if obj1.suspicious and obj2.suspicious]
         duplicates = await asyncio.gather(*duplicates_tasks)

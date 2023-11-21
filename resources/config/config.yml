@@ -41,6 +41,8 @@ UOD:
   DETECTED_TO_SUSPICIOUS_TIMEOUT: 15
   # через сколько секунд подозрительный становится унесенным
   SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 15
+  # через сколько секунд не нахождения в маске предмет теряется
+  DISAPPEARANCE_TIMEOUT: 6
   # сколько секунд истории хранить
   HISTORY_ACCUMULATION_TIME: 5
   # сколько кадров сохранить

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from operator import itemgetter
 
 import numpy as np
@@ -36,12 +37,12 @@ class MaskDataMatcher:
             if abs(new_[0][-1] - exciting_.contour_area) / exciting_.contour_area > self.det_obj_area_threshold \
                     and not exciting_.unattended:
                 exciting_.update(contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
-                                 centroid_coordinates=new_[0][:2], updated=True)
+                                 centroid_coordinates=new_[0][:2], last_seen_timestamp=time.time(), updated=True)
                 # а также начинаем копить маску только после того, как объект станет подозрительным
                 if exciting_.suspicious:
                     exciting_.update(contour_mask=new_[1])
             else:
-                exciting_.update(centroid_coordinates=new_[0][:2], updated=True)
+                exciting_.update(centroid_coordinates=new_[0][:2], last_seen_timestamp=time.time(), updated=True)
 
         # находим iou между текущим новым объектом и теми, что уже были обнаружены
         new_detected_iou = [(idx, iou(new_object_data[2:-1], detected_object.bbox_coordinates))

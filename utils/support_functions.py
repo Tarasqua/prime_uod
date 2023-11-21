@@ -71,6 +71,9 @@ async def plot_bboxes(detected_objects: list, frame: np.array) -> np.array:
     :return: Фрейм с отрисованными ббоксами.
     """
 
+    if not detected_objects:
+        return frame
+
     async def plot(object_data: DetectedObject) -> None:
         """Строим один bbox."""
         x1, y1, x2, y2 = object_data.bbox_coordinates
