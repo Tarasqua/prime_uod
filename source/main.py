@@ -4,7 +4,7 @@ from tkinter import filedialog
 
 import cv2
 
-from utils.roi_polygon import ROIPolygon
+from utils.roi_polygon_selector import ROIPolygonSelector
 from source.unattended_obj_detection.uod import UOD
 
 
@@ -30,7 +30,7 @@ class Main:
         fps = cap.get(cv2.CAP_PROP_FPS)
         _, frame = cap.read()
         assert frame is not None, "Couldn't open stream source"
-        roi = ROIPolygon().get_roi(frame)
+        roi = ROIPolygonSelector().get_roi(frame)
         uod = UOD(frame.shape, frame.dtype, roi, int(fps), False)
         # demo = self.__get_demo('demo_uod.mp4', (1440, 576))
         cv2.namedWindow('foreground')

@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 
 
-class ROIPolygon:
+class ROIPolygonSelector:
     """Выделение области интереса (ROI - Region Of Interest)"""
 
     def __init__(self):
