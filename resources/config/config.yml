@@ -38,15 +38,15 @@ UOD:
   # изменить координаты рамки, в %
   DETECTED_OBJ_AREA_THRESHOLD: 2
   # через сколько секунд обнаруженный становится подозрительным
-  DETECTED_TO_SUSPICIOUS_TIMEOUT: 15
+  DETECTED_TO_SUSPICIOUS_TIMEOUT: 20
   # через сколько секунд подозрительный становится унесенным
-  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 15
+  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 6
   # через сколько секунд не нахождения в маске предмет теряется
   DISAPPEARANCE_TIMEOUT: 6
   # сколько секунд истории хранить
-  HISTORY_ACCUMULATION_TIME: 5
+  HISTORY_ACCUMULATION_TIME: 15
   # сколько кадров сохранить
-  FRAMES_TO_SAVE_NUMBER: 10
+  FRAMES_TO_SAVE_NUMBER: 15
 
 DETECTED_OBJECT:
   # ВРЕМЕННОЕ РЕШЕНИЕ

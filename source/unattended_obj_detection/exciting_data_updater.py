@@ -2,6 +2,7 @@ import asyncio
 import time
 from itertools import combinations
 
+import cv2
 import numpy as np
 
 from utils.support_functions import iou, save_unattended_object
@@ -38,16 +39,19 @@ class DataUpdater:
                 # помечаем его как подозрительный
                 detected_object.update(suspicious=True)
             elif obs_time >= self.unattended_timeout and not detected_object.unattended:
+                # по итоговому контуру из маски, находим координаты bbox'а оставленного предмета
+                x, y, w, h = cv2.boundingRect(cv2.findContours(
+                    np.uint8(detected_object.contour_mask.copy()), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0][0])
                 # добавляем в список с оставленными с наследованием id
                 unattended_objects.append(
                     UnattendedObject(
                         object_id=detected_object.object_id, contour_mask=detected_object.contour_mask,
-                        bbox_coordinates=detected_object.bbox_coordinates,
+                        bbox_coordinates=np.array([x, y, x + w, y + h]),
                         leaving_frames=detected_object.leaving_frames,
                         detection_timestamp=detected_object.detection_timestamp
                     ))
-                # помечаем его как оставленный в списке обнаруженных
-                detected_object.update(unattended=True)
+                # помечаем его как оставленный в списке обнаруженных, а также обновляем bbox
+                detected_object.update(unattended=True, bbox_coordinates=np.array([x, y, x + w, y + h]))
             # смотрим, что объект не был сопоставлен в текущем кадре
             if not detected_object.updated:
                 # + проверка по таймауту отсутствия => если предмет ее не проходит, он отфильтровывается
@@ -77,25 +81,11 @@ class DataUpdater:
         """
 
         async def check_pair(obj1: DetectedObject, obj2: DetectedObject) -> DetectedObject:
-            """Смотрим, пересекаются ли объекты и возвращаем меньший по площади"""
+            """Смотрим, пересекаются ли объекты и возвращаем тот, что появился позже"""
             if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > 0:
-                # находим раннее время обнаружения
-                min_det_timestamp = min(obj1.detection_timestamp, obj2.detection_timestamp)
-                # берем меньший по площади - его и отфильтруем далее
-                if obj1.contour_area < obj2.contour_area:
-                    # большему присваиваем раннее время наблюдения и переприсваиваем кадры оставления, так как
-                    # это один и тот же объект и в процессе проявления он мог пропадать и появляться снова и снова
-                    obj2.set_det_timestamp(min_det_timestamp)
-                    obj2.set_leaving_frames(
-                        obj1.leaving_frames if obj1.detection_timestamp == min_det_timestamp else obj2.leaving_frames)
-                    return obj1
-                else:
-                    obj1.set_det_timestamp(min_det_timestamp)
-                    obj1.set_leaving_frames(
-                        obj1.leaving_frames if obj1.detection_timestamp == min_det_timestamp else obj2.leaving_frames)
-                    return obj2
+                return obj2 if obj1.detection_timestamp < obj2.detection_timestamp else obj1
 
-        # таким образом убираем те объекты, которые задублировались и их площадь меньше
+        # таким образом убираем те объекты, которые задублировались и их время обнаружения позже
         duplicates_tasks = [asyncio.create_task(check_pair(obj1, obj2)) for obj1, obj2
                             in combinations(detected_objects, 2) if obj1.suspicious and obj2.suspicious]
         duplicates = await asyncio.gather(*duplicates_tasks)
