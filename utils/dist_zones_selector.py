@@ -16,7 +16,11 @@ class DistZonesSelector:
             if len(self.dist_zones_points) < 2:  # выделяем 2 зоны
                 self.current_points = np.append(self.current_points, np.array([[x, y]]).astype(int), axis=0)
         if event == cv2.EVENT_MBUTTONDOWN:  # колесико мыши
-            self.current_points = self.current_points[:-1]
+            if self.current_points.size != 0:  # если есть текущие точки
+                self.current_points = self.current_points[:-1]  # удаляем текущие
+            else:
+                # если же текущих точек нет, удаляем зоны
+                self.dist_zones_points = self.dist_zones_points[:-1]
 
     def __draw_dist_zones(self) -> None:
         for i, zone_points in enumerate(self.dist_zones_points):  # отрисовка уже законченных зон

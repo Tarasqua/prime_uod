@@ -32,7 +32,11 @@ class ROIPolygonSelector:
             else:
                 self.polygon_points = np.append(self.polygon_points, np.array([[x, y]]).astype(int), axis=0)
         if event == cv2.EVENT_MBUTTONDOWN:  # колесико мыши
-            self.polygon_points = self.polygon_points[:-1]
+            if self.polygon_points.size != 0:  # если есть текущие точки полигона
+                self.polygon_points = self.polygon_points[:-1]  # удаляем текущие
+            else:
+                # если же текущих точек нет, удаляем полигоны
+                self.polygons = self.polygons[:-1]
 
     def __draw_polygon(self) -> None:
         """
