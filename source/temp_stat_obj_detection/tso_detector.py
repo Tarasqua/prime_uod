@@ -2,10 +2,12 @@
 @tarasqua
 """
 import asyncio
+from typing import List
 
 import cv2
 import numpy as np
 
+from source.temp_stat_obj_detection.dist_zones_handler import DistZonesHandler
 from source.temp_stat_obj_detection.background_subtractor import BackgroundSubtractor
 from source.config_loader import Config
 from ultralytics.engine.results import Masks
@@ -15,13 +17,19 @@ from ultralytics.utils import ops
 class TSODetector:
     """Обработка кадра, нахождение в нем временно статических объектов."""
 
-    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: list):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype,
+                 roi: List[np.array], dist_zones_points: List[np.array]):
         self.frame_shape = frame_shape
         config_ = Config('config.yml')
         self.area_threshold = (np.prod(np.array(frame_shape[:-1])) *  # % от площади кадра
                                (config_.get('TSO', 'AREA_THRESH_FRAME_PERCENT') * 0.01))
         self.con_comp_connectivity = config_.get('TSO', 'CON_COMPONENTS_CONNECTIVITY')
-        self.bg_subtractor = BackgroundSubtractor(frame_shape)
+        self.dist_zones_handler = DistZonesHandler(frame_shape, dist_zones_points)
+        reduce_ = config_.get('BG_SUBTRACTION', 'REDUCE_FRAME_SHAPE_MULTIPLIER')
+        self.bg_subtractor_models = [
+            BackgroundSubtractor(shape, multiplier) for shape, multiplier
+            in zip(self.dist_zones_handler.get_frames_shapes(),
+                   [reduce_['LONG_RANGE'], reduce_['SEMI_LONG_RANGE'], reduce_['CLOSE_RANGE']])]
         self.roi_stencil = self.__get_roi_mask(frame_shape[:-1], frame_dtype, roi)
         self.tso_mask = None
 
@@ -100,6 +108,27 @@ class TSODetector:
         data_masks = await asyncio.gather(*process_area_tasks)
         return [(data, mask) for data, mask in data_masks if data is not None]  # фильтруем None
 
+    async def get_dist_zones_tso_mask(self, current_frame: np.array) -> np.array:
+        """
+        Получение маски со временно статическими объектами:
+            - разбиваем текущий кадр на зоны дальности;
+            - обрабатываем каждую зону, получая маски со временно статическими объектами;
+            - объединяем маски в одну маску с общим крупным планом в разрешении текущего изображения.
+        :param current_frame: Текущий кадр последовательности.
+        :return: Маска со временно статическими объектами.
+        """
+        async def get_mask(frame: np.array, model: BackgroundSubtractor):
+            """Вспомогательная функция, которая получает маску со временно
+                статическим объектами для данной модели."""
+            tso_mask = await model.get_tso_mask(frame)
+            return tso_mask
+
+        dist_zones_frames = await self.dist_zones_handler.get_dist_zones_frames(current_frame)
+        tso_masks = await asyncio.gather(*[
+            asyncio.create_task(get_mask(frame, model))
+            for frame, model in zip(dist_zones_frames, self.bg_subtractor_models)])
+        return await self.dist_zones_handler.get_merged_mask(tso_masks)
+
     async def process_frame(self, current_frame: np.array, det_masks: Masks or None, uo_masks: list or None) -> tuple:
         """
         Обработка изображения, нахождение временно статических объектов в кадре.
@@ -109,7 +138,7 @@ class TSODetector:
         :return: List из tuple'ов вида [(np.array(centroid_x, centroid_y, x1, y1, x2, y2), mask), (...), ...]
         """
         # получаем маску со временно статическим объектами
-        self.tso_mask = await self.bg_subtractor.get_tso_mask(current_frame)
+        self.tso_mask = await self.get_dist_zones_tso_mask(current_frame)
         # применяем ROI к маске
         self.tso_mask = cv2.bitwise_and(self.tso_mask, self.roi_stencil)
         # если есть люди, вычитаем их из маски

@@ -21,8 +21,8 @@ class UOD:
     Unattended Object Detector
     """
 
-    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: list,
-                 stream_fps: int, remove_people: bool = True):
+    def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: List[np.array],
+                 dist_zones_points: List[np.array], stream_fps: int, remove_people: bool = True):
         """
         Детектор оставленных предметов.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
@@ -32,7 +32,7 @@ class UOD:
         """
         self.remove_people = remove_people  # для отладки или для большей производительности и меньшей точности
         config_ = Config('config.yml')
-        self.tso_detector = TSODetector(frame_shape, frame_dtype, roi)
+        self.tso_detector = TSODetector(frame_shape, frame_dtype, roi, dist_zones_points)
         self.mask_data_matcher = MaskDataMatcher(
             config_.get('UOD', 'DETECTED_OBJ_AREA_THRESHOLD') / 100,
             config_.get('UOD', 'IOU_THRESHOLD'),

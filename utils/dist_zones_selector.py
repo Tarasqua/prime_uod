@@ -3,6 +3,7 @@ import cv2
 
 
 class DistZonesSelector:
+    """Выбор зон дальности в кадре."""
 
     def __init__(self):
         self.dist_zones_points = []
@@ -30,15 +31,15 @@ class DistZonesSelector:
         :param image: Изображение в формате np.array.
         :return: list из np.array формата [[x, y], [x, y], ...].
         """
-        cv2.namedWindow('image')
-        cv2.setMouseCallback('image', self.__check_click)
+        cv2.namedWindow('Distance Zones')
+        cv2.setMouseCallback('Distance Zones', self.__check_click)
         while True:
             if self.current_points.size == 4:
                 self.dist_zones_points.append(self.current_points)
                 self.current_points = np.empty((0, 2), dtype=int, order='C')
             self.frame_copy = image.copy()
             self.__draw_dist_zones()
-            cv2.imshow('image', self.frame_copy)
+            cv2.imshow('Distance Zones', self.frame_copy)
             if cv2.waitKey(33) == 13:  # enter, чтобы закончить
                 break
         cv2.destroyAllWindows()

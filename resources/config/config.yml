@@ -24,7 +24,10 @@ BG_SUBTRACTION:
     ITERATIONS: 2
   # во сколько раз уменьшать изображение прежде чем применять модель
   # (для лучшей производительности на больших изображениях)
-  REDUCE_FRAME_SHAPE_MULTIPLIER: 3
+  REDUCE_FRAME_SHAPE_MULTIPLIER:
+    LONG_RANGE: 1  # для дальнего плана
+    SEMI_LONG_RANGE: 2  # для среднего плана
+    CLOSE_RANGE: 4  # для ближнего плана
 
 # Unattended Objects Detector
 UOD:
@@ -38,17 +41,12 @@ UOD:
   # изменить координаты рамки, в %
   DETECTED_OBJ_AREA_THRESHOLD: 2
   # через сколько секунд обнаруженный становится подозрительным
-  DETECTED_TO_SUSPICIOUS_TIMEOUT: 20
+  DETECTED_TO_SUSPICIOUS_TIMEOUT: 25
   # через сколько секунд подозрительный становится унесенным
-  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 6
+  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 10
   # через сколько секунд не нахождения в маске предмет теряется
   DISAPPEARANCE_TIMEOUT: 6
   # сколько секунд истории хранить
   HISTORY_ACCUMULATION_TIME: 15
   # сколько кадров сохранить
   FRAMES_TO_SAVE_NUMBER: 15
-
-DETECTED_OBJECT:
-  # ВРЕМЕННОЕ РЕШЕНИЕ
-  # количество кадров, которое должно пройти, чтобы забыть объект
-  DEFAULT_DISAPPEARANCE_COUNTER: 300

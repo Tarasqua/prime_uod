@@ -5,6 +5,7 @@ from tkinter import filedialog
 import cv2
 
 from utils.roi_polygon_selector import ROIPolygonSelector
+from utils.dist_zones_selector import DistZonesSelector
 from source.unattended_obj_detection.uod import UOD
 
 
@@ -31,7 +32,8 @@ class Main:
         _, frame = cap.read()
         assert frame is not None, "Couldn't open stream source"
         roi = ROIPolygonSelector().get_roi(frame)
-        uod = UOD(frame.shape, frame.dtype, roi, int(fps), False)
+        dist_zones = DistZonesSelector().get_dist_zones(frame)
+        uod = UOD(frame.shape, frame.dtype, roi, dist_zones, int(fps), False)
         # demo = self.__get_demo('demo_uod.mp4', (1440, 576))
         cv2.namedWindow('foreground')
         cv2.setMouseCallback('foreground', self.__check_click)

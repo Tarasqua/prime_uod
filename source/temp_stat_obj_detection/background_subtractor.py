@@ -14,7 +14,7 @@ class BackgroundSubtractor:
     Нахождение маски со временно статическими объектами
     """
 
-    def __init__(self, frame_shape: np.array):
+    def __init__(self, frame_shape: np.array, reduce_frame_shape_multiplier: float = 1):
         """
         Нахождение маски со временно статическими объектами, путем нахождения абсолютной разницы
             между исходными кадрами без движения, полученными в результате замены пикселей
@@ -41,8 +41,7 @@ class BackgroundSubtractor:
         self.morph_close_iterations = config_.get('BG_SUBTRACTION', 'MORPH_CLOSE', 'ITERATIONS')
         # Дополнительные переменные
         self.frame_shape = frame_shape[:-1][::-1]
-        self.resize_shape = (np.array(self.frame_shape) /
-                             config_.get('BG_SUBTRACTION', 'REDUCE_FRAME_SHAPE_MULTIPLIER')).astype(int)
+        self.resize_shape = (np.array(self.frame_shape) / reduce_frame_shape_multiplier).astype(int)
         self.tso_mask = None
 
     @staticmethod

@@ -56,12 +56,12 @@ class ROIPolygonSelector:
         :param image: Изображение в формате np.array.
         :return: list из np.array формата [[x, y], [x, y], ...].
         """
-        cv2.namedWindow('image')
-        cv2.setMouseCallback('image', self.__check_click)
+        cv2.namedWindow('ROI')
+        cv2.setMouseCallback('ROI', self.__check_click)
         while True:
             self.frame_copy = image.copy()
             self.__draw_polygon()
-            cv2.imshow('image', self.frame_copy)
+            cv2.imshow('ROI', self.frame_copy)
             if cv2.waitKey(33) == 13:  # enter, чтобы закончить
                 break
         cv2.destroyAllWindows()
