@@ -10,6 +10,7 @@ from utils.support_functions import iou
 
 class MaskDataMatcher:
     """Вспомогательный класс для сопоставления контуров из маски с теми, что уже есть в базе."""
+
     def __init__(self, det_obj_area_threshold: float, iou_threshold: float, frames_to_save: int):
         """
         :param det_obj_area_threshold: Порог по площади объекта в маске.
@@ -32,17 +33,27 @@ class MaskDataMatcher:
         """
 
         def update_exciting(exciting_: DetectedObject, new_: np.array) -> None:
-            """Обновление уже существующего в базе объекта."""
-            # если площадь изменилась на n% и n - больше порогового, а также данный предмет еще не оставленный
-            if abs(new_[0][-1] - exciting_.contour_area) / exciting_.contour_area > self.det_obj_area_threshold \
-                    and not exciting_.unattended:
-                exciting_.update(contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
-                                 centroid_coordinates=new_[0][:2], last_seen_timestamp=time.time(), updated=True)
-                # а также начинаем копить маску только после того, как объект станет подозрительным
-                if exciting_.suspicious:
-                    exciting_.update(contour_mask=new_[1])
-            else:
-                exciting_.update(centroid_coordinates=new_[0][:2], last_seen_timestamp=time.time(), updated=True)
+            """
+            Обновление уже существующего в базе объекта.
+            :param exciting_: Существующий в базе объект.
+            :param new_: Объект, который был сопоставлен.
+            :return: None.
+            """
+            # в любом случае обновляем последнее время наблюдения и то, что объект был сопоставлен
+            exciting_.update(last_seen_timestamp=time.time(), updated=True)
+            # перестаем обновлять другие параметры как только объект стал оставленным
+            if not exciting_.unattended:
+                if exciting_.suspicious:  # как только стал подозрительным, т.е. +- устаканился,
+                    # и при условии, что площадь не сильно скакнула
+                    # (площадь сегмента скачет, если рядом возникло шумовое движение)...
+                    if (abs(new_[0][-1] - exciting_.contour_area) / exciting_.contour_area
+                            < self.det_obj_area_threshold):
+                        # ...обновляем bbox, центроид, площадь + копим маску
+                        exciting_.update(contour_area=new_[0][-1], contour_mask=new_[1],
+                                         bbox_coordinated=new_[0][2:-1], centroid_coordinates=new_[0][:2])
+                else:  # если же предмет пока только формируется, обновляем все параметры
+                    exciting_.update(contour_area=new_[0][-1], bbox_coordinated=new_[0][2:-1],
+                                     centroid_coordinates=new_[0][:2])
 
         # находим iou между текущим новым объектом и теми, что уже были обнаружены
         new_detected_iou = [(idx, iou(new_object_data[2:-1], detected_object.bbox_coordinates))

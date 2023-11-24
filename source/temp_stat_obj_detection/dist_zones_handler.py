@@ -72,5 +72,5 @@ class DistZonesHandler:
 
         [await task for task in [
             asyncio.create_task(merge_masks(mask, points))
-            for mask, points in zip(masks[:-1], self.dist_zones_points)]]
+            for mask, points in zip(masks[:-1][::-1], self.dist_zones_points[::-1])]]
         return masks[-1]

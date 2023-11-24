@@ -14,12 +14,13 @@ class BackgroundSubtractor:
     Нахождение маски со временно статическими объектами
     """
 
-    def __init__(self, frame_shape: np.array, reduce_frame_shape_multiplier: float = 1):
+    def __init__(self, frame_shape: np.array, reduce_frame_shape_multiplier: float):
         """
         Нахождение маски со временно статическими объектами, путем нахождения абсолютной разницы
             между исходными кадрами без движения, полученными в результате замены пикселей
             движения пикселями заднего плана из моделей с разным временем накопления.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
+        :param reduce_frame_shape_multiplier: Во сколько раз уменьшать изображения для обработки.
         """
         config_ = Config('config.yml')
         # Модели вычитания фонов
@@ -49,7 +50,7 @@ class BackgroundSubtractor:
             frame: np.array, model: cv2.bgsegm.BackgroundSubtractorGSOC) -> np.ndarray:
         """
         Подменяет пиксели в переданном изображении на пиксели фона (полученного путем
-        применения переданной модели вычитания фона) в тех местах, где есть движение
+            применения переданной модели вычитания фона) в тех местах, где есть движение
         в маске переднего плана.
         :param frame: Копия текущего кадра.
         :param model: Модель вычитания фона GSOC OpenCV.

@@ -15,6 +15,21 @@ from ultralytics import YOLO
 from utils.templates import UnattendedObject, DetectedObject
 
 
+def get_roi_mask(frame_shape: tuple[int, int, int], frame_dtype: np.dtype, roi: list) -> np.array:
+    """
+    Создает маску, залитую черным вне ROI.
+    :param frame_shape: Размер изображения (height, width, channels).
+    :param frame_dtype: Тип изображения (uint8, etc).
+    :param roi: Полигон точек вида np.array([[x, y], [x, y], ...]).
+    :return: Маска, залитая белым внутри ROI и черным - во вне.
+    """
+    stencil = np.zeros(frame_shape).astype(frame_dtype)
+    [cv2.bitwise_or(stencil, s)  # применяем каждый полигон к маске
+     for s in [cv2.fillPoly(stencil, [r], (255, 255, 255))
+               for r in roi]]
+    return stencil
+
+
 def set_yolo_model(yolo_model) -> YOLO:
     """
     Выполняет проверку путей и наличие модели:
