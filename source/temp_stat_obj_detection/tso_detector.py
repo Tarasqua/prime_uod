@@ -16,21 +16,33 @@ from ultralytics.utils import ops
 
 
 class TSODetector:
-    """Обработка кадра, нахождение в нем временно статических объектов."""
+    """Детектор временно статических объектов."""
 
     def __init__(self, frame_shape: np.array, frame_dtype: np.dtype,
-                 roi: List[np.array], dist_zones_points: List[np.array]):
+                 roi: List[np.array], dist_zones_points: List[np.array] | None):
+        """
+        Обработка кадра, нахождение в нем временно статических объектов.
+        :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
+        :param frame_dtype: Тип кадра последовательности (cv2 image.dtype).
+        :param roi: Список ROI-полигонов.
+        :param dist_zones_points: Список точек зон дальности.
+            Если None, разбиения на зоны дальности нет и берется уменьшение кадра для ближнего плана.
+        """
         self.frame_shape = frame_shape
+        self.dist_zones_points = dist_zones_points
         config_ = Config('config.yml')
         self.area_threshold = (np.prod(np.array(frame_shape[:-1])) *  # % от площади кадра
                                (config_.get('TSO', 'AREA_THRESH_FRAME_PERCENT') * 0.01))
         self.con_comp_connectivity = config_.get('TSO', 'CON_COMPONENTS_CONNECTIVITY')
-        self.dist_zones_handler = DistZonesHandler(frame_shape, dist_zones_points)
         reduce_ = config_.get('BG_SUBTRACTION', 'REDUCE_FRAME_SHAPE_MULTIPLIER')
-        self.bg_subtractor_models = [
-            BackgroundSubtractor(shape, multiplier) for shape, multiplier
-            in zip(self.dist_zones_handler.get_frames_shapes(),
-                   [reduce_['LONG_RANGE'], reduce_['SEMI_LONG_RANGE'], reduce_['CLOSE_RANGE']])]
+        if dist_zones_points is not None:  # использовать разбиение на зоны дальности или нет
+            self.dist_zones_handler = DistZonesHandler(frame_shape, dist_zones_points)
+            self.bg_subtractors = [
+                BackgroundSubtractor(shape, multiplier) for shape, multiplier
+                in zip(self.dist_zones_handler.get_frames_shapes(),
+                       [reduce_['LONG_RANGE'], reduce_['SEMI_LONG_RANGE'], reduce_['CLOSE_RANGE']])]
+        else:
+            self.bg_subtractor = BackgroundSubtractor(frame_shape, reduce_['CLOSE_RANGE'])
         self.roi_stencil = get_roi_mask(frame_shape[:-1], frame_dtype, roi)
 
     async def __get_mask_data(self, tso_mask: np.array) -> list:
@@ -97,7 +109,7 @@ class TSODetector:
         dist_zones_frames = await self.dist_zones_handler.get_dist_zones_frames(current_frame)
         tso_masks = await asyncio.gather(*[
             asyncio.create_task(get_mask(frame, model))
-            for frame, model in zip(dist_zones_frames, self.bg_subtractor_models)])
+            for frame, model in zip(dist_zones_frames, self.bg_subtractors)])
         return await self.dist_zones_handler.get_merged_mask(tso_masks)
 
     async def process_frame(self, current_frame: np.array, det_masks: Masks or None, uo_masks: list or None) -> tuple:
@@ -109,7 +121,8 @@ class TSODetector:
         :return: List из tuple'ов вида [(np.array(centroid_x, centroid_y, x1, y1, x2, y2), mask), (...), ...]
         """
         # получаем маску со временно статическим объектами
-        tso_mask = await self.__get_dist_zones_tso_mask(current_frame)
+        tso_mask = await self.__get_dist_zones_tso_mask(current_frame) if self.dist_zones_points is not None \
+            else await self.bg_subtractor.get_tso_mask(current_frame)
         # применяем ROI к маске
         tso_mask = cv2.bitwise_and(tso_mask, self.roi_stencil)
 

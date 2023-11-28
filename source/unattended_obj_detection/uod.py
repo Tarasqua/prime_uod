@@ -22,12 +22,15 @@ class UOD:
     """
 
     def __init__(self, frame_shape: np.array, frame_dtype: np.dtype, roi: List[np.array],
-                 dist_zones_points: List[np.array], stream_fps: int, remove_people: bool = True):
+                 dist_zones_points: List[np.array] | None, stream_fps: int, remove_people: bool = True):
         """
         Детектор оставленных предметов.
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
         :param frame_dtype: Тип кадра последовательности (cv2 image.dtype).
         :param roi: Список ROI-полигонов.
+        :param dist_zones_points: Список точек зон дальности.
+            Если None, разбиения на зоны дальности нет и берется уменьшение кадра для ближнего плана.
+        :param stream_fps: Частота кадров видео последовательности.
         :param remove_people: Удалять из маски движения людей или нет.
         """
         self.remove_people = remove_people  # для отладки или для большей производительности и меньшей точности

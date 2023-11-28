@@ -22,6 +22,7 @@ class BackgroundSubtractor:
         :param frame_shape: Размеры кадра последовательности (cv2 image.shape).
         :param reduce_frame_shape_multiplier: Во сколько раз уменьшать изображения для обработки.
         """
+        self.reduce_frame_shape_multiplier = reduce_frame_shape_multiplier
         config_ = Config('config.yml')
         # Модели вычитания фонов
         self.gsoc_slow = cv2.bgsegm.createBackgroundSubtractorGSOC(
@@ -42,7 +43,7 @@ class BackgroundSubtractor:
         self.morph_close_iterations = config_.get('BG_SUBTRACTION', 'MORPH_CLOSE', 'ITERATIONS')
         # Дополнительные переменные
         self.frame_shape = frame_shape[:-1][::-1]
-        self.resize_shape = (np.array(self.frame_shape) / reduce_frame_shape_multiplier).astype(int)
+        self.resize_shape = (np.array(self.frame_shape) / self.reduce_frame_shape_multiplier).astype(int)
         self.tso_mask = None
 
     @staticmethod

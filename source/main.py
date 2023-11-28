@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 import cv2
+import numpy as np
 
 from utils.roi_polygon_selector import ROIPolygonSelector
 from utils.dist_zones_selector import DistZonesSelector
@@ -13,7 +14,6 @@ class Main:
 
     def __init__(self, stream_source: str):
         self.stream_source = stream_source
-        self.timer_flag = False
 
     @staticmethod
     def __get_demo(file_name: str, im_shape: tuple[int, int]):
@@ -23,7 +23,7 @@ class Main:
     def __check_click(self, event, x, y, flags, param) -> None:
         """Слушатель нажатия кнопок"""
         if event == cv2.EVENT_LBUTTONDOWN:  # левая кнопка мыши
-            self.timer_flag = not self.timer_flag
+            print(f'x={x}, y={y}')
 
     async def main(self):
         """Временная имплементация"""
@@ -37,14 +37,10 @@ class Main:
         # demo = self.__get_demo('demo_uod.mp4', (1440, 576))
         cv2.namedWindow('foreground')
         cv2.setMouseCallback('foreground', self.__check_click)
-        counter = 1
         while cap.isOpened():
             _, frame = cap.read()
             if frame is None:
                 break
-            if self.timer_flag:
-                print(counter)
-                counter += 1
             frame = await uod.detect_(frame)
             # demo.write(frame)
             cv2.imshow('foreground', frame)
