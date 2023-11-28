@@ -1,3 +1,4 @@
+import time
 import asyncio
 import tkinter as tk
 from tkinter import filedialog
@@ -41,7 +42,7 @@ class Main:
             _, frame = cap.read()
             if frame is None:
                 break
-            frame = await uod.detect_(frame)
+            frame = await uod.detect_(frame, time.time())
             # demo.write(frame)
             cv2.imshow('foreground', frame)
             if cv2.waitKey(1) & 0xFF == 27:

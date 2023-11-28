@@ -25,7 +25,7 @@ BG_SUBTRACTION:
   # во сколько раз уменьшать изображение прежде чем применять модель
   # (для лучшей производительности на больших изображениях)
   REDUCE_FRAME_SHAPE_MULTIPLIER:
-    LONG_RANGE: 0.5  # для дальнего плана
+    LONG_RANGE: 1  # для дальнего плана
     SEMI_LONG_RANGE: 2  # для среднего плана
     CLOSE_RANGE: 6  # для ближнего плана
 
@@ -47,6 +47,6 @@ UOD:
   # через сколько секунд не нахождения в маске предмет теряется
   DISAPPEARANCE_TIMEOUT: 6
   # сколько секунд истории хранить
-  HISTORY_ACCUMULATION_TIME: 15
+  HISTORY_ACCUMULATION_TIME: 8
   # сколько кадров сохранить
   FRAMES_TO_SAVE_NUMBER: 15

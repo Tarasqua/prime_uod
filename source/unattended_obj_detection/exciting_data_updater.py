@@ -1,5 +1,4 @@
 import asyncio
-import time
 from itertools import combinations
 
 import cv2
@@ -20,25 +19,28 @@ class DataUpdater:
         self.fill_unattended_cont_timeout = suspicious_timeout + unattended_timeout
 
     async def update_detected_objects(
-            self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject]) -> (
-            tuple)[list[DetectedObject] or [], list[UnattendedObject]]:
+            self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject],
+            timestamp: float) -> tuple[list[DetectedObject] or [], list[UnattendedObject]]:
         """
         Проверяем по таймауту время наблюдения за обнаруженными объектами и, в случае
             прохождения проверки, в зависимости от времени наблюдения, помечаем объект как
             подозрительный или оставленный и, в случае выявления последнего, добавляем к оставленным.
         Также обновляем счетчик отсутствия и удаляем те объекты, в которых счетчик достиг нуля
             (то есть предмета больше в кадре нет).
+        :param detected_objects: Список обнаруженных предметов, который нужно обновить.
+        :param unattended_objects: Список оставленных предметов, который нужно обновить.
+        :param timestamp: Текущий timestamp.
         :return: Tuple из списков обнаруженных и оставленных предметов.
         """
 
-        async def update_object(detected_object: DetectedObject, current_time: float) -> DetectedObject:
+        async def update_object(detected_object: DetectedObject) -> DetectedObject:
             """Обновление одного объекта."""
             # проверка по таймауту на подозрительно долгое пребывание в кадре
-            obs_time = current_time - detected_object.detection_timestamp
-            if obs_time >= self.suspicious_timeout and not detected_object.suspicious:
+            obs_time = timestamp - detected_object.detection_timestamp
+            if obs_time >= self.suspicious_timeout and not detected_object.suspicious and detected_object.updated:
                 # помечаем его как подозрительный
                 detected_object.update(suspicious=True)
-            elif obs_time >= self.unattended_timeout and not detected_object.unattended:
+            elif obs_time >= self.unattended_timeout and not detected_object.unattended and detected_object.updated:
                 # по итоговому контуру из маски, находим координаты bbox'а оставленного предмета
                 x, y, w, h = cv2.boundingRect(cv2.findContours(
                     np.uint8(detected_object.contour_mask.copy()), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0][0])
@@ -55,15 +57,14 @@ class DataUpdater:
             # смотрим, что объект не был сопоставлен в текущем кадре
             if not detected_object.updated:
                 # + проверка по таймауту отсутствия => если предмет ее не проходит, он отфильтровывается
-                if current_time - detected_object.last_seen_timestamp < self.disappearance_timeout:
+                if timestamp - detected_object.last_seen_timestamp < self.disappearance_timeout:
                     return detected_object
             else:
                 detected_object.update(updated=False)  # меняем флаг на False для следующего кадра
                 return detected_object
 
-        cur_time = time.time()
         # проверяем и обновляем обнаруженные
-        update_detected_tasks = [asyncio.create_task(update_object(detected_object, cur_time))
+        update_detected_tasks = [asyncio.create_task(update_object(detected_object))
                                  for detected_object in detected_objects]
         detected_objects = await asyncio.gather(*update_detected_tasks)
         # фильтруем None
@@ -77,6 +78,7 @@ class DataUpdater:
             Так как крупные предметы проявляются в маске постепенно => могут дублироваться; а так как
             проверять все обнаруженные объекты не имеет смысла, ввиду того, что они появляются и пропадают
             достаточно быстро и большинство из них не сопоставится, проверяем только подозрительные.
+        :param detected_objects: Список обнаруженных предметов.
         :return: Список из обнаруженных предметов без дубликатов.
         """
 
@@ -92,11 +94,14 @@ class DataUpdater:
         return [obj for obj in detected_objects if obj not in duplicates or not obj.suspicious]
 
     async def update_unattended_objects(
-            self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject]) -> (
-            tuple[list[UnattendedObject], list[np.array] or []]):
+            self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject],
+            timestamp: float) -> tuple[list[UnattendedObject], list[np.array] or []]:
         """
         Обновление оставленных предметов с возвратом списка масок, с учетом того, что данный
             оставленный предмет больше не наблюдается в маске временно статических объектов.
+        :param detected_objects: Список обнаруженных предметов.
+        :param unattended_objects: Список оставленных предметов.
+        :param timestamp: Текущий timestamp.
         :return: Tuple из списков обновленных оставленных предметов и масок оставленных предметов.
         """
 
@@ -107,7 +112,7 @@ class DataUpdater:
                 await save_unattended_object(unattended_object)
             # учитываем то, что данный оставленный больше не наблюдается
             if unattended_object.object_id not in [det_obj.object_id for det_obj in detected_objects]:
-                unattended_object.update(obs_loss_timestamp=time.time())
+                unattended_object.update(obs_loss_timestamp=timestamp)
                 return unattended_object.contour_mask  # возвращаем маску
             else:
                 return None
@@ -119,7 +124,6 @@ class DataUpdater:
         # фильтруем None
         unattended_masks = [mask for mask in unattended_masks if mask is not None]
         # удаляем объекты по таймауту
-        current_time = time.time()
         unattended_objects = [unattended_object for unattended_object in unattended_objects if
-                              current_time - unattended_object.obs_loss_timestamp < self.fill_unattended_cont_timeout]
+                              timestamp - unattended_object.obs_loss_timestamp < self.fill_unattended_cont_timeout]
         return unattended_objects, unattended_masks

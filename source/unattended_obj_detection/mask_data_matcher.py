@@ -1,5 +1,4 @@
 import asyncio
-import time
 from operator import itemgetter
 
 import numpy as np
@@ -19,9 +18,10 @@ class MaskDataMatcher:
         """
         self.det_obj_area_threshold = det_obj_area_threshold
         self.iou_threshold = iou_threshold
+        self.frames_to_save = frames_to_save
+        self.timestamp = float('inf')
         self.detected_objects = []
         self.history_frames = []
-        self.frames_to_save = frames_to_save
 
     async def __match_new_object(self, new_object_data: np.array, new_object_mask: np.array) -> None:
         """
@@ -40,7 +40,7 @@ class MaskDataMatcher:
             :return: None.
             """
             # в любом случае обновляем последнее время наблюдения и то, что объект был сопоставлен
-            exciting_.update(last_seen_timestamp=time.time(), updated=True)
+            exciting_.update(last_seen_timestamp=self.timestamp, updated=True)
             # перестаем обновлять другие параметры как только объект стал оставленным
             if not exciting_.unattended:
                 if exciting_.suspicious:  # как только стал подозрительным, т.е. +- устаканился,
@@ -72,14 +72,16 @@ class MaskDataMatcher:
                     leaving_frames=self.history_frames[::int(len(self.history_frames) / self.frames_to_save)])
             )
 
-    async def match_mask_data(self, mask_data: np.array, detected_objects: list, history_frames: list) -> (
-            list)[DetectedObject]:
+    async def match_mask_data(
+            self, mask_data: np.array, detected_objects: list, history_frames: list,
+            timestamp: float) -> list[DetectedObject]:
         """
         Сопоставление новых данных из маски с уже имеющимися в базе обнаруженных предметов.
         :param mask_data: Все данные, полученные из маски в формате
             np.array([[centroid_x, centroid_y, x1, y1, x2, y2, area], [...]]).
         :param detected_objects: Список объектов, которые нужно обновить.
         :param history_frames: Список кадров истории.
+        :param timestamp: Текущий timestamp.
         :return: Обновленный список обнаруженных предметов.
         """
         # если список пустой, добавляем все объекты
@@ -101,6 +103,7 @@ class MaskDataMatcher:
         # если же в кадре есть временно статические объекты
         self.detected_objects = detected_objects
         self.history_frames = history_frames
+        self.timestamp = timestamp
         # связываем только что полученные с уже имеющимися объектами
         match_bbox_tasks = [asyncio.create_task(self.__match_new_object(data, mask))
                             for data, mask in mask_data]

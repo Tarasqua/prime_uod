@@ -57,10 +57,11 @@ class UOD:
         self.history_frames = deque(
             maxlen=int(config_.get('UOD', 'HISTORY_ACCUMULATION_TIME') * stream_fps))
 
-    async def detect_(self, current_frame: np.array) -> np.array:
+    async def detect_(self, current_frame: np.array, timestamp: float) -> np.array:
         """
         Нахождение оставленных предметов в последовательности кадров.
         :param current_frame: Текущее изображение последовательности.
+        :param timestamp: Текущий timestamp.
         :return: ДЛЯ ДЕМОНСТРАЦИИ кадры с отрисованными подозрительными (желтая рамка)
             и оставленными предметами (красная рамка).
         """
@@ -68,7 +69,8 @@ class UOD:
         self.history_frames.append(current_frame.copy())
         # обновялем оставленные и берем маски
         self.unattended_objects, unattended_masks = \
-            await self.data_updater.update_unattended_objects(self.detected_objects, self.unattended_objects) if (
+            await self.data_updater.update_unattended_objects(
+                self.detected_objects, self.unattended_objects, timestamp) if (
                 self.unattended_objects) else ([], None)
         # получаем bbox'ы из модели фона и удаляем из маски подтвержденные оставленные предметы, чтобы детекция не
         # сработала повторно на часть объекта, образовавшегося от распада полного на несколько составляющих
@@ -82,14 +84,15 @@ class UOD:
                 current_frame, None, unattended_masks)
         # сопоставляем новые с уже имеющимися
         self.detected_objects = await self.mask_data_matcher.match_mask_data(
-            mask_data, self.detected_objects, list(self.history_frames))
+            mask_data, self.detected_objects, list(self.history_frames), timestamp)
         if self.detected_objects:
             # обновляем обнаруженные предметы + проверяем, не стал ли какой-либо предмет оставленным по таймауту
             self.detected_objects, self.unattended_objects = \
-                await self.data_updater.update_detected_objects(self.detected_objects, self.unattended_objects)
+                await self.data_updater.update_detected_objects(
+                    self.detected_objects, self.unattended_objects, timestamp)
             # удаляем возможные дубликаты подозрительных предметов
             self.detected_objects = await self.data_updater.check_suspicious_duplicates(self.detected_objects)
         # отрисовываем подозрительные и/или оставленные объекты (временное решение)
-        current_frame = await plot_bboxes(self.detected_objects, current_frame)
+        detections_frame = await plot_bboxes(self.detected_objects, current_frame.copy())
         # return current_frame
-        return np.concatenate([current_frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)
+        return np.concatenate([detections_frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)
