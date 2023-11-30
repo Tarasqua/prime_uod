@@ -59,10 +59,11 @@ def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
     ).numpy()[0][0]
 
 
-async def save_unattended_object(obj: UnattendedObject) -> None:
+async def save_unattended_object(obj: UnattendedObject, save_frames: bool = False) -> None:
     """
     Сохраняет кадр, сделанный во время обнаружения предмета и делаем пометку об этом.
     :param obj: Оставленный объект - объект класса UnattendedObject.
+    :param save_frames: Сохранять ли кадры детекции для демонстрации или нет.
     :return: None.
     """
     # создаем новую папку для сохранения кадров
@@ -73,9 +74,12 @@ async def save_unattended_object(obj: UnattendedObject) -> None:
         os.mkdir(directory)
     # сохраняем кадры в папку
     x1, y1, x2, y2 = obj.bbox_coordinates
-    for frame in obj.leaving_frames:
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        cv2.imwrite(os.path.join(directory, f'{len(os.listdir(directory)) + 1}.png'), frame)
+    if save_frames:
+        for frame in obj.leaving_frames[::int(len(obj.leaving_frames) / 15)]:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.imwrite(os.path.join(directory, f'{len(os.listdir(directory)) + 1}.png'), frame)
+    # сохраняем все данные по предмету с сохранением структуры
+    torch.save(obj, os.path.join(directory, f'unattended_object_data.pt'))
     # выставляем флаг, что объект сохранен
     obj.update(saved=True)
 

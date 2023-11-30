@@ -10,7 +10,7 @@ from utils.support_functions import iou
 class MaskDataMatcher:
     """Вспомогательный класс для сопоставления контуров из маски с теми, что уже есть в базе."""
 
-    def __init__(self, det_obj_area_threshold: float, iou_threshold: float, frames_to_save: int):
+    def __init__(self, det_obj_area_threshold: float, iou_threshold: float):
         """
         :param det_obj_area_threshold: Порог по площади объекта в маске.
         :param iou_threshold: Порог по IOU для сопоставления объектов в маске.
@@ -18,7 +18,6 @@ class MaskDataMatcher:
         """
         self.det_obj_area_threshold = det_obj_area_threshold
         self.iou_threshold = iou_threshold
-        self.frames_to_save = frames_to_save
         self.timestamp = float('inf')
         self.detected_objects = []
         self.history_frames = []
@@ -69,7 +68,7 @@ class MaskDataMatcher:
                 DetectedObject(
                     contour_area=new_object_data[-1], bbox_coordinates=new_object_data[2:-1],
                     contour_mask=new_object_mask,
-                    leaving_frames=self.history_frames[::int(len(self.history_frames) / self.frames_to_save)])
+                    leaving_frames=self.history_frames)
             )
 
     async def match_mask_data(
@@ -89,7 +88,7 @@ class MaskDataMatcher:
             [detected_objects.append(
                 DetectedObject(
                     contour_area=data[-1], bbox_coordinates=data[2:-1], contour_mask=mask,
-                    leaving_frames=history_frames[::int(len(history_frames) / self.frames_to_save)]))
+                    leaving_frames=history_frames))
                 for data, mask in mask_data]
             return detected_objects
 

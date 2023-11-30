@@ -38,8 +38,7 @@ class UOD:
         self.tso_detector = TSODetector(frame_shape, frame_dtype, roi, dist_zones_points)
         self.mask_data_matcher = MaskDataMatcher(
             config_.get('UOD', 'DETECTED_OBJ_AREA_THRESHOLD') / 100,
-            config_.get('UOD', 'IOU_THRESHOLD'),
-            config_.get('UOD', 'FRAMES_TO_SAVE_NUMBER')
+            config_.get('UOD', 'IOU_THRESHOLD')
         )
         self.data_updater = DataUpdater(
             config_.get('UOD', 'DETECTED_TO_SUSPICIOUS_TIMEOUT'),
@@ -84,7 +83,7 @@ class UOD:
                 current_frame, None, unattended_masks)
         # сопоставляем новые с уже имеющимися
         self.detected_objects = await self.mask_data_matcher.match_mask_data(
-            mask_data, self.detected_objects, list(self.history_frames), timestamp)
+            mask_data, self.detected_objects, list(self.history_frames)[:int(len(self.history_frames) / 4)], timestamp)
         if self.detected_objects:
             # обновляем обнаруженные предметы + проверяем, не стал ли какой-либо предмет оставленным по таймауту
             self.detected_objects, self.unattended_objects = \
@@ -94,5 +93,5 @@ class UOD:
             self.detected_objects = await self.data_updater.check_suspicious_duplicates(self.detected_objects)
         # отрисовываем подозрительные и/или оставленные объекты (временное решение)
         detections_frame = await plot_bboxes(self.detected_objects, current_frame.copy())
-        # return current_frame
+        # return detections_frame
         return np.concatenate([detections_frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)

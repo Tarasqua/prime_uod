@@ -107,7 +107,7 @@ class DataUpdater:
 
         async def update_object(unattended_object: UnattendedObject) -> np.array or None:
             """Обновление счетчика с возвратом маски, а также его сохранение."""
-            # ВРЕМЕННО просто сохраняем кадры
+            # ВРЕМЕННО сохраняем данные по оставленному предмету
             if not unattended_object.saved:  # сохраняем, если еще не сохранен
                 await save_unattended_object(unattended_object)
             # учитываем то, что данный оставленный больше не наблюдается

@@ -47,6 +47,4 @@ UOD:
   # через сколько секунд не нахождения в маске предмет теряется
   DISAPPEARANCE_TIMEOUT: 6
   # сколько секунд истории хранить
-  HISTORY_ACCUMULATION_TIME: 8
-  # сколько кадров сохранить
-  FRAMES_TO_SAVE_NUMBER: 15
+  HISTORY_ACCUMULATION_TIME: 20
