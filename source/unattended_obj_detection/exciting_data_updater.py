@@ -20,7 +20,7 @@ class DataUpdater:
 
     async def update_detected_objects(
             self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject],
-            timestamp: float) -> tuple[list[DetectedObject] or [], list[UnattendedObject]]:
+            timestamp: float, current_frame: np.array) -> tuple[list[DetectedObject] or [], list[UnattendedObject]]:
         """
         Проверяем по таймауту время наблюдения за обнаруженными объектами и, в случае
             прохождения проверки, в зависимости от времени наблюдения, помечаем объект как
@@ -30,6 +30,7 @@ class DataUpdater:
         :param detected_objects: Список обнаруженных предметов, который нужно обновить.
         :param unattended_objects: Список оставленных предметов, который нужно обновить.
         :param timestamp: Текущий timestamp.
+        :param current_frame: Текущий кадр.
         :return: Tuple из списков обнаруженных и оставленных предметов.
         """
 
@@ -50,7 +51,8 @@ class DataUpdater:
                         object_id=detected_object.object_id, contour_mask=detected_object.contour_mask,
                         bbox_coordinates=np.array([x, y, x + w, y + h]),
                         leaving_frames=detected_object.leaving_frames,
-                        detection_timestamp=detected_object.detection_timestamp
+                        detection_timestamp=detected_object.detection_timestamp,
+                        detection_frame=current_frame
                     ))
                 # помечаем его как оставленный в списке обнаруженных, а также обновляем bbox
                 detected_object.update(unattended=True, bbox_coordinates=np.array([x, y, x + w, y + h]))

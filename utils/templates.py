@@ -96,6 +96,7 @@ class UnattendedObject(BaseModel):
     Структура данных для выявленных оставленных предметов.
     :param object_id: Уникальный id объекта.
     :param detection_timestamp: Timestamp обнаружения объекта в маске.
+    :param detection_frame: Frame подтверждения того, что предмет - оставленный.
     :param obs_loss_timestamp: Timestamp потери объекта в маске.
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
@@ -108,6 +109,7 @@ class UnattendedObject(BaseModel):
 
     object_id: UUID = Field(default_factory=uuid4)
     detection_timestamp: time = Field(default_factory=lambda: time.time())
+    detection_frame: np.array = np.array([])
     obs_loss_timestamp: time = float('inf')
     leaving_frames: List[np.array] = []
     contour_mask: np.array = np.array([])

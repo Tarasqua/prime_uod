@@ -88,7 +88,7 @@ class UOD:
             # обновляем обнаруженные предметы + проверяем, не стал ли какой-либо предмет оставленным по таймауту
             self.detected_objects, self.unattended_objects = \
                 await self.data_updater.update_detected_objects(
-                    self.detected_objects, self.unattended_objects, timestamp)
+                    self.detected_objects, self.unattended_objects, timestamp, current_frame.copy())
             # удаляем возможные дубликаты подозрительных предметов
             self.detected_objects = await self.data_updater.check_suspicious_duplicates(self.detected_objects)
         # отрисовываем подозрительные и/или оставленные объекты (временное решение)
