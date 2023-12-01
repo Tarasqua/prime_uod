@@ -83,7 +83,7 @@ class UOD:
                 current_frame, None, unattended_masks)
         # сопоставляем новые с уже имеющимися
         self.detected_objects = await self.mask_data_matcher.match_mask_data(
-            mask_data, self.detected_objects, list(self.history_frames)[:int(len(self.history_frames) / 4)], timestamp)
+            mask_data, self.detected_objects, list(self.history_frames)[:int(len(self.history_frames) / 3)], timestamp)
         if self.detected_objects:
             # обновляем обнаруженные предметы + проверяем, не стал ли какой-либо предмет оставленным по таймауту
             self.detected_objects, self.unattended_objects = \

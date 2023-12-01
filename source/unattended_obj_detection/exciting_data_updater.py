@@ -52,7 +52,7 @@ class DataUpdater:
                         bbox_coordinates=np.array([x, y, x + w, y + h]),
                         leaving_frames=detected_object.leaving_frames,
                         detection_timestamp=detected_object.detection_timestamp,
-                        detection_frame=current_frame
+                        confirmation_frame=current_frame
                     ))
                 # помечаем его как оставленный в списке обнаруженных, а также обновляем bbox
                 detected_object.update(unattended=True, bbox_coordinates=np.array([x, y, x + w, y + h]))

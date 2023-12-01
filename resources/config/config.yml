@@ -27,7 +27,7 @@ BG_SUBTRACTION:
   REDUCE_FRAME_SHAPE_MULTIPLIER:
     LONG_RANGE: 1  # для дальнего плана
     SEMI_LONG_RANGE: 2  # для среднего плана
-    CLOSE_RANGE: 6  # для ближнего плана
+    CLOSE_RANGE: 5  # для ближнего плана
 
 # Unattended Objects Detector
 UOD:
@@ -41,10 +41,16 @@ UOD:
   # и накопления маски, в %
   DETECTED_OBJ_AREA_THRESHOLD: 5
   # через сколько секунд обнаруженный становится подозрительным
-  DETECTED_TO_SUSPICIOUS_TIMEOUT: 15
+  DETECTED_TO_SUSPICIOUS_TIMEOUT: 10
   # через сколько секунд подозрительный становится унесенным
-  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 10
+  SUSPICIOUS_TO_UNATTENDED_TIMEOUT: 5
   # через сколько секунд не нахождения в маске предмет теряется
   DISAPPEARANCE_TIMEOUT: 6
   # сколько секунд истории хранить
   HISTORY_ACCUMULATION_TIME: 20
+
+PERS_OBJ_LINKER:
+  # насколько схожа должна быть область с оставленным предметом,
+  # чтобы считать, что при схожести ниже данной, данный кадр - оставленный, в %
+  # (чем меньше, тем кадр оставления будет дальше в истории)
+  SIMILARITY_THRESHOLD: 70
