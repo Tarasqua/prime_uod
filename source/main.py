@@ -13,7 +13,7 @@ from source.unattended_obj_detection.uod import UOD
 
 class Main:
 
-    def __init__(self, stream_source: str):
+    def __init__(self, stream_source: str | int):
         self.stream_source = stream_source
 
     @staticmethod
@@ -53,8 +53,8 @@ class Main:
 
 
 if __name__ == '__main__':
-    root = tk.Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename()
-    main = Main(file_path)
+    # root = tk.Tk()
+    # root.withdraw()
+    # file_path = filedialog.askopenfilename()
+    main = Main(2)
     asyncio.run(main.main())
