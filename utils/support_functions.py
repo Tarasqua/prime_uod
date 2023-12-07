@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torchvision import ops
 from ultralytics import YOLO
+from shapely.geometry import Polygon
 
 from utils.templates import UnattendedObject, DetectedObject
 
@@ -30,17 +31,19 @@ def get_roi_mask(frame_shape: tuple[int, int, int], frame_dtype: np.dtype, roi: 
     return stencil
 
 
-def set_yolo_model(yolo_model) -> YOLO:
+def set_yolo_model(yolo_model: str, yolo_class: str) -> YOLO:
     """
     Выполняет проверку путей и наличие модели:
         Если директория отсутствует, создает ее, а также скачивает в нее необходимую модель
-    :param yolo_model: n (nano), m (medium)...
+    :param yolo_model: n (nano), m (medium), etc.
+    :param yolo_class: seg, pose, boxes
     :return: Объект YOLO-pose
     """
+    yolo_class = f'-{yolo_class}' if yolo_class != 'boxes' else ''
     yolo_models_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'models', 'yolo_models')
     if not os.path.exists(yolo_models_path):
         Path(yolo_models_path).mkdir(parents=True, exist_ok=True)
-    model_path = os.path.join(yolo_models_path, f'yolov8{yolo_model}-seg')
+    model_path = os.path.join(yolo_models_path, f'yolov8{yolo_model}{yolo_class}')
     if not os.path.exists(f'{model_path}.onnx'):
         YOLO(model_path).export(format='onnx')
     return YOLO(f'{model_path}.onnx')
@@ -105,3 +108,43 @@ async def plot_bboxes(detected_objects: list, frame: np.array) -> np.array:
                   if detected_object.suspicious or detected_object.unattended]
     [await task for task in plot_tasks]
     return frame
+
+
+def cart2pol(x, y) -> tuple[float, float]:
+    """
+    Перевод декартовых координат в полярные.
+    :param x: Координата x.
+    :param y: Координата y.
+    :return: rho (радиус), phi (угол).
+    """
+    rho = np.sqrt(x ** 2 + y ** 2)
+    phi = np.arctan2(y, x)
+    return rho, phi
+
+
+def pol2cart(rho, phi) -> tuple[float, float]:
+    """
+    Перевод полярных координат в декартовы.
+    :param rho: Координата x
+    :param phi: Координата y
+    :return: Координаты по x и y
+    """
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return x, y
+
+
+def inflate_polygon(polygon_points: np.array, scale_multiplier: float) -> np.array:
+    """
+    Раздувает полигон точек.
+    :param polygon_points: Полигон точек вида np.array([[x, y], [x, y], ...]).
+    :param scale_multiplier: Во сколько раз раздуть рамку.
+    :return: Раздутый полигон того же вида, что и входной.
+    """
+    centroid = Polygon(polygon_points).centroid
+    inflated_polygon = []
+    for point in polygon_points:
+        rho, phi = cart2pol(point[0] - centroid.x, point[1] - centroid.y)
+        x, y = pol2cart(rho * scale_multiplier, phi)
+        inflated_polygon.append([x + centroid.x, y + centroid.y])
+    return np.array(inflated_polygon)

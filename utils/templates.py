@@ -100,6 +100,7 @@ class UnattendedObject(BaseModel):
     :param obs_loss_timestamp: Timestamp потери объекта в маске.
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
+    :param probably_left_object_people: Кадры людей, которые, вероятнее всего, оставили предмет.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
     :param bbox_coordinates: Координаты bbox'а объекта.
     :param saved: Флаг, отвечающий за то, сохранен ли данный предмет в базу или нет
@@ -112,6 +113,7 @@ class UnattendedObject(BaseModel):
     confirmation_frame: np.array = np.array([])
     obs_loss_timestamp: time = float('inf')
     leaving_frames: List[np.array] = []
+    probably_left_object_people: List[np.array] = []
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
     saved: bool = False
@@ -132,3 +134,11 @@ class UnattendedObject(BaseModel):
                     self.saved = value
                 case 'obs_loss_timestamp':
                     self.obs_loss_timestamp = value
+
+    def set_prob_left(self, prob_left: list) -> None:
+        """
+        Сеттер параметра предполагаемых людей, оставивших предмет.
+        :param prob_left: Список кадров предполагаемых людей.
+        :return: None.
+        """
+        self.probably_left_object_people = prob_left

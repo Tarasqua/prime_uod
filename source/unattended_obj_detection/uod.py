@@ -46,7 +46,8 @@ class UOD:
              config_.get('UOD', 'SUSPICIOUS_TO_UNATTENDED_TIMEOUT')),
             config_.get('UOD', 'DISAPPEARANCE_TIMEOUT')
         )
-        self.yolo_seg = set_yolo_model(config_.get('UOD', 'HUMAN_DETECTION', 'YOLO_MODEL')) \
+        self.yolo_seg = set_yolo_model(config_.get('UOD', 'HUMAN_DETECTION', 'YOLO_MODEL'),
+                                       'seg') \
             if remove_people else None
         self.yolo_conf = config_.get('UOD', 'HUMAN_DETECTION', 'YOLO_CONFIDENCE') \
             if remove_people else None
