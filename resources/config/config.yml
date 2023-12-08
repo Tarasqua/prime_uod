@@ -39,7 +39,7 @@ UOD:
   IOU_THRESHOLD: 0.2
   # максимальный скачок по площади объекта для обновления площади
   # и накопления маски, в %
-  DETECTED_OBJ_AREA_THRESHOLD: 15
+  DETECTED_OBJ_AREA_THRESHOLD: 20
   # через сколько секунд обнаруженный становится подозрительным
   DETECTED_TO_SUSPICIOUS_TIMEOUT: 10
   # через сколько секунд подозрительный становится унесенным
@@ -62,3 +62,5 @@ PERS_OBJ_LINKER:
   # раздуваем область bbox'а объекта в N раз с некоторым шагом до тех пор, пока не найдем пересечения
   MAX_INFLATE_BBOX: 2.5
   INFLATE_BBOX_STEP: 0.3
+  # количество кластеров для KMeans
+  KMEANS_N_CLUSTERS: 3

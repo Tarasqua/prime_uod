@@ -103,8 +103,7 @@ class UnattendedObject(BaseModel):
     :param probably_left_object_people: Кадры людей, которые, вероятнее всего, оставили предмет.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
     :param bbox_coordinates: Координаты bbox'а объекта.
-    :param saved: Флаг, отвечающий за то, сохранен ли данный предмет в базу или нет
-        (для того, чтобы продолжать заливать маску, но не сохранять больше 1 раза).
+    :param linked: Флаг, отвечающий за то, что для данного предмета найден человек, оставивший его.
     """
     __config = Config('config.yml')
 
@@ -116,29 +115,25 @@ class UnattendedObject(BaseModel):
     probably_left_object_people: List[np.array] = []
     contour_mask: np.array = np.array([])
     bbox_coordinates: np.array = Field(default_factory=lambda: np.zeros(4))
-    saved: bool = False
+    linked: bool = False
 
     class Config:
         """Для того чтобы была возможность объявлять поля как numpy array."""
         arbitrary_types_allowed = True
 
-    def update(self, **new_data) -> None:
+    def set_obs_loss_timestamp(self, loss_timestamp) -> None:
         """
-        Обновление данных.
-        :param new_data: Новые данные.
+        Сеттер для времени ненаблюдения объекта в кадре.
+        :param loss_timestamp: Время ненаблюдения.
         :return: None.
         """
-        for field, value in new_data.items():
-            match field:
-                case 'saved':
-                    self.saved = value
-                case 'obs_loss_timestamp':
-                    self.obs_loss_timestamp = value
+        self.obs_loss_timestamp = loss_timestamp
 
-    def set_prob_left(self, prob_left: list) -> None:
+    def set_prob_left(self, prob_left: list | None) -> None:
         """
         Сеттер параметра предполагаемых людей, оставивших предмет.
         :param prob_left: Список кадров предполагаемых людей.
         :return: None.
         """
-        self.probably_left_object_people = prob_left
+        self.probably_left_object_people = prob_left if prob_left is not None else []
+        self.linked = True  # и сразу же ставим флаг на то, что предмет уже прошел связывание

@@ -53,8 +53,8 @@ class Main:
 
 
 if __name__ == '__main__':
-    # root = tk.Tk()
-    # root.withdraw()
-    # file_path = filedialog.askopenfilename()
-    main = Main(2)
+    root = tk.Tk()
+    root.withdraw()
+    file_path = filedialog.askopenfilename()
+    main = Main(file_path)
     asyncio.run(main.main())

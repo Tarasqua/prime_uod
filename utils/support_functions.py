@@ -31,12 +31,13 @@ def get_roi_mask(frame_shape: tuple[int, int, int], frame_dtype: np.dtype, roi: 
     return stencil
 
 
-def set_yolo_model(yolo_model: str, yolo_class: str) -> YOLO:
+def set_yolo_model(yolo_model: str, yolo_class: str, task: str = 'detect') -> YOLO:
     """
     Выполняет проверку путей и наличие модели:
         Если директория отсутствует, создает ее, а также скачивает в нее необходимую модель
     :param yolo_model: n (nano), m (medium), etc.
     :param yolo_class: seg, pose, boxes
+    :param task: detect, segment, classify, pose
     :return: Объект YOLO-pose
     """
     yolo_class = f'-{yolo_class}' if yolo_class != 'boxes' else ''
@@ -46,7 +47,7 @@ def set_yolo_model(yolo_model: str, yolo_class: str) -> YOLO:
     model_path = os.path.join(yolo_models_path, f'yolov8{yolo_model}{yolo_class}')
     if not os.path.exists(f'{model_path}.onnx'):
         YOLO(model_path).export(format='onnx')
-    return YOLO(f'{model_path}.onnx')
+    return YOLO(f'{model_path}.onnx', task=task)
 
 
 def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
@@ -62,11 +63,10 @@ def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
     ).numpy()[0][0]
 
 
-async def save_unattended_object(obj: UnattendedObject, save_frames: bool = False) -> None:
+async def save_unattended_object(obj: UnattendedObject) -> None:
     """
     Сохраняет кадр, сделанный во время обнаружения предмета и делаем пометку об этом.
     :param obj: Оставленный объект - объект класса UnattendedObject.
-    :param save_frames: Сохранять ли кадры детекции для демонстрации или нет.
     :return: None.
     """
     # создаем новую папку для сохранения кадров
@@ -75,16 +75,15 @@ async def save_unattended_object(obj: UnattendedObject, save_frames: bool = Fals
                              datetime.datetime.fromtimestamp(obj.detection_timestamp).strftime("%B %d, %H:%M:%S"))
     if not os.path.exists(directory):
         os.mkdir(directory)
-    # сохраняем кадры в папку
     x1, y1, x2, y2 = obj.bbox_coordinates
-    if save_frames:
-        for frame in obj.leaving_frames[::int(len(obj.leaving_frames) / 15)]:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            cv2.imwrite(os.path.join(directory, f'{len(os.listdir(directory)) + 1}.png'), frame)
-    # сохраняем все данные по предмету с сохранением структуры
-    torch.save(obj, os.path.join(directory, f'unattended_object_data.pt'))
-    # выставляем флаг, что объект сохранен
-    obj.update(saved=True)
+    # сохраняем предполагаемых оставителей
+    for i, human_frame in enumerate(obj.probably_left_object_people):
+        cv2.imwrite(os.path.join(directory, f'suspicious_{i}.png'), human_frame)
+    # момент оставления
+    cv2.imwrite(os.path.join(directory, f'leaving_moment.png'), obj.leaving_frames)
+    # момент подтверждения
+    cv2.imwrite(os.path.join(directory, f'confirmation_moment.png'),
+                cv2.rectangle(obj.confirmation_frame.copy(), (x1, y1), (x2, y2), (0, 0, 255), 2))
 
 
 async def plot_bboxes(detected_objects: list, frame: np.array) -> np.array:

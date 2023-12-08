@@ -1,16 +1,17 @@
 import asyncio
 import time
-from typing import List
+from typing import List, Tuple
 
 import cv2
 import numpy as np
 import torch
 from skimage.metrics import structural_similarity
+from sklearn.cluster import KMeans
 from scipy.signal import savgol_filter
 import ultralytics.engine.results
 
 from utils.templates import UnattendedObject
-from utils.support_functions import set_yolo_model, inflate_polygon
+from utils.support_functions import set_yolo_model, inflate_polygon, iou, save_unattended_object
 from source.config_loader import Config
 
 
@@ -22,10 +23,12 @@ class PersObjLinker:
         self.similarity_threshold = config_.get(
             'PERS_OBJ_LINKER', 'SIMILARITY_THRESHOLD') / 100
         self.yolo_pose = set_yolo_model(
-            config_.get('PERS_OBJ_LINKER', 'HUMAN_DETECTION', 'YOLO_MODEL'), 'pose')
+            config_.get('PERS_OBJ_LINKER', 'HUMAN_DETECTION', 'YOLO_MODEL'),
+            'boxes', 'detect')
         self.yolo_conf = config_.get('PERS_OBJ_LINKER', 'HUMAN_DETECTION', 'YOLO_CONFIDENCE')
         self.max_inflate_bbox = config_.get('PERS_OBJ_LINKER', 'MAX_INFLATE_BBOX')
         self.inflate_step = config_.get('PERS_OBJ_LINKER', 'INFLATE_BBOX_STEP')
+        self.n_clusters = config_.get('PERS_OBJ_LINKER', 'KMEANS_N_CLUSTERS')
 
     async def __find_leaving_frame(self, unattended_object: UnattendedObject) -> None:
         """
@@ -58,42 +61,58 @@ class PersObjLinker:
             -next((i for i, s in enumerate(approximated_similarity_scores) if s <= self.similarity_threshold),
                   len(approximated_similarity_scores))]  # если нет ниже порога, берем крайнее
 
-    async def __link(self, unattended_object: UnattendedObject):
+    async def __nearest_object_people(
+            self, detections: ultralytics.engine.results.Results,
+            obj_bbox: np.array) -> List[ultralytics.engine.results.Results]:
+        """
+        Определение ближайших к предмету людей путем кластеризации с помощью KMeans.
+        :param detections: YOLO-detections всех людей в кадре.
+        :param obj_bbox: Координаты bbox'а оставленного предмета.
+        :return: Список ближайших к предмету людей.
+        """
+
+        def get_bottom_centroid(detection: ultralytics.engine.results.Results) -> np.array:
+            """
+            Нахождение центроида по нижней грани bbox'а человека.
+            :param detection: YOLO-detection.
+            :return: Координаты центроида в формате np.array([x, y])
+            """
+            x1, y1, x2, y2 = detection.boxes.xyxy.numpy()[0]
+            return np.array([(x1 + x2) / 2, y2])
+
+        # находим центроиды последовательно, чтобы можно было однозначно сопоставить kmeans-лейбл и человека
+        centroids = [get_bottom_centroid(det) for det in detections]
+        kmeans = KMeans(n_clusters=self.n_clusters, random_state=0, n_init='auto').fit(np.array(centroids))
+        # находим лейбл предмета
+        prediction = kmeans.predict(np.array([[(obj_bbox[0] + obj_bbox[2]) / 2, obj_bbox[3]]]))
+        # возвращаем только тех людей, лейбл которых совпадает с лейблом предмета
+        return [det for i, det in enumerate(detections) if kmeans.labels_[i] == prediction[0]]
+
+    async def __link(self, unattended_object: UnattendedObject) -> None:
         """
         Связывание предмета с предполагаемым человеком (или несколькими людьми), который мог его оставить:
             - находим людей в кадре;
-            - смотрим, не пересекаются ли конечности кого-либо из людей в кадре с bbox'ом предмета;
+            - проверяем их количество - если их достаточно много, используем кластеризацию для фильтрации, т.к.
+                в противном случае, из-за перспективных искажений, люди, стоящие близко к камере, но далеко от
+                предмета, могут стать теми, кто, предположительно, оставил предмет;
+            - смотрим, не пересекаются ли нижние трети bbox'ов кого-либо из людей в кадре с bbox'ом предмета;
             - если нет, раздуваем bbox до тех пор, пока не будет пересечения;
             - записываем в данный объект изображение предполагаемого человека (людей).
         :param unattended_object: Оставленный предмет (объект класса UnattendedObject).
-        :return:
+        :return: None.
         """
-
-        async def check_inside(point: np.array, conf: np.float32, bbox: np.array) -> bool:
-            """
-            Проверка на то, что точка лежит внутри bbox'а, а также conf больше порогового.
-            :param point: Координаты точки: np.array([x, y]).
-            :param conf: Confidence данной точки.
-            :param bbox: Координаты bbox'а, в котором должна лежать точка.
-            :return: True, если точка лежит внутри или на границе, а иначе - False.
-            """
-            return True \
-                if bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3] and conf >= self.yolo_conf \
-                else False
 
         async def check_detection(detection: ultralytics.engine.results.Results, bbox: np.array) -> bool:
             """
-            Проверка на то, что конечности данного человека пересекаются с bbox'ом предмета.
+            Проверка на то, что нижняя треть (именно та, где, скорее всего, находятся конечности) bbox'а
+                данного человека пересекаются с bbox'ом предмета.
             :param detection: YOLO detection.
             :param bbox: Bbox предмета.
             :return: True, если пересекаются, иначе - False.
             """
-            keypoints = detection.keypoints.data.numpy()[0]
-            check_tasks = [asyncio.create_task(check_inside(limb[:-1], limb[-1], bbox))
-                           for limb in [keypoints[9], keypoints[10],  # кисти
-                                        keypoints[15], keypoints[16]]]  # лодыжки
-            checked_limbs = await asyncio.gather(*check_tasks)
-            return True if any(checked_limbs) else False
+            det_bbox = detection.boxes.xyxy.numpy()[0].copy()
+            det_bbox[1] += (det_bbox[3] - det_bbox[1]) / 3
+            return True if iou(bbox, det_bbox) > 0 else False
 
         async def get_prob_left_frame(detection: ultralytics.engine.results.Results, ref_frame: np.array) -> np.array:
             """
@@ -107,51 +126,45 @@ class PersObjLinker:
 
         # находим людей в кадре
         detections: ultralytics.engine.results.Results = self.yolo_pose.predict(
-            unattended_object.leaving_frames, classes=[0], verbose=False, conf=self.yolo_conf)[0]
+            unattended_object.leaving_frames, classes=[0], verbose=False)[0]
+        # если никого не нашли
+        if len(detections) == 0:
+            unattended_object.set_prob_left(None)  # предполагамых оставителей в None
+            return  # и брякаемся
+        # если людей в кадре нашлось много, используем кластеризацию
+        detections = await self.__nearest_object_people(detections, unattended_object.bbox_coordinates) \
+            if len(detections) >= self.n_clusters else detections
         # сначала проверяем на пересечение с исходным bbox'ом
-        scale_multiplier = 1
+        scale_multiplier, prob_left = 1, []
         obj_x1, obj_y1, obj_x2, obj_y2 = unattended_object.bbox_coordinates
         polygon = np.array([[obj_x1, obj_y1], [obj_x2, obj_y1], [obj_x2, obj_y2], [obj_x1, obj_y2]])
-        prob_left = []
         # ищем до первого (первых) пересечения
         while scale_multiplier <= self.max_inflate_bbox:
-            polygon = inflate_polygon(
-                polygon, scale_multiplier) if scale_multiplier != 1 else polygon
+            polygon = inflate_polygon(polygon, scale_multiplier) if scale_multiplier != 1 else polygon
             prob_left = [
                 det for det in detections if await check_detection(det, np.concatenate([polygon[0], polygon[2]]))]
             if prob_left:
                 break
             scale_multiplier += self.inflate_step
         prob_left = detections if not prob_left else prob_left  # если вдруг никого не нашли, возвращаем всех
-        frames_tasks = [asyncio.create_task(
-            get_prob_left_frame(det, unattended_object.leaving_frames.copy())) for det in prob_left]
-        people_frames = await asyncio.gather(*frames_tasks)
+        people_frames = await asyncio.gather(*[asyncio.create_task(
+            get_prob_left_frame(det, unattended_object.leaving_frames.copy())) for det in prob_left])
         unattended_object.set_prob_left(people_frames)
 
-    async def link_objects(self, unattended_objects: List[UnattendedObject]) -> List[UnattendedObject]:
+    async def link_objects(self, unattended_objects: List[UnattendedObject]) -> None:
         """
         Связывание оставленных объектов и предполагаемых людей, оставивших их:
             - находим кадр оставления предмета;
             - находим человека (или людей), которые, предположительно, могли оставить этот предмет.
         :param unattended_objects: Список оставленных предметов.
-        :return:
+        :return: None
         """
+        # находим кадр оставления предмета
         [await task for task in
          [asyncio.create_task(self.__find_leaving_frame(obj)) for obj in unattended_objects]]
+        # связываем предполагаемых оставителей с ним
         [await task for task in
          [asyncio.create_task(self.__link(obj)) for obj in unattended_objects]]
-        return unattended_objects
-
-
-async def run():
-    data: UnattendedObject = torch.load('../../resources/leaving_frame_stat/unattended_object_data_s2v4.pt')
-    data.leaving_frames = data.leaving_frames[::2]
-    pol = PersObjLinker()
-    start = time.time()
-    objects = await pol.link_objects([data])
-    print(time.time() - start)
-    cv2.imwrite('test.png', objects[0].probably_left_object_people[0])
-
-
-if __name__ == '__main__':
-    asyncio.run(run())
+        # для демонстрации сохраняем предмет и оставителя (оставителей)
+        [await task for task in
+         [asyncio.create_task(save_unattended_object(obj)) for obj in unattended_objects]]

@@ -4,8 +4,9 @@ from itertools import combinations
 import cv2
 import numpy as np
 
-from utils.support_functions import iou, save_unattended_object
+from utils.support_functions import iou
 from utils.templates import DetectedObject, UnattendedObject
+from source.person_object_linking.person_object_linker import PersObjLinker
 
 
 class DataUpdater:
@@ -17,6 +18,7 @@ class DataUpdater:
         self.disappearance_timeout = disappearance_timeout
         # время, которое сегмент оставленного предмета будет заливаться черным в маске после его исчезновения
         self.fill_unattended_cont_timeout = suspicious_timeout + unattended_timeout
+        self.pers_obj_linker = PersObjLinker()
 
     async def update_detected_objects(
             self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject],
@@ -108,17 +110,16 @@ class DataUpdater:
         """
 
         async def update_object(unattended_object: UnattendedObject) -> np.array or None:
-            """Обновление счетчика с возвратом маски, а также его сохранение."""
-            # ВРЕМЕННО сохраняем данные по оставленному предмету
-            if not unattended_object.saved:  # сохраняем, если еще не сохранен
-                await save_unattended_object(unattended_object)
+            """Обновление счетчика с возвратом маски."""
             # учитываем то, что данный оставленный больше не наблюдается
             if unattended_object.object_id not in [det_obj.object_id for det_obj in detected_objects]:
-                unattended_object.update(obs_loss_timestamp=timestamp)
+                unattended_object.set_obs_loss_timestamp(timestamp)
                 return unattended_object.contour_mask  # возвращаем маску
             else:
                 return None
 
+        # связываем предметы с предполагаемыми оставителями, если они еще не связаны
+        await self.pers_obj_linker.link_objects([obj for obj in unattended_objects if not obj.linked])
         # обновляем объекты и складываем маски
         update_tasks = [asyncio.create_task(update_object(unattended_object))
                         for unattended_object in unattended_objects]
