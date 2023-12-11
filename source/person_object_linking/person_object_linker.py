@@ -1,10 +1,8 @@
 import asyncio
-import time
 from typing import List, Tuple
 
 import cv2
 import numpy as np
-import torch
 from skimage.metrics import structural_similarity
 from sklearn.cluster import KMeans
 from scipy.signal import savgol_filter
@@ -37,11 +35,30 @@ class PersObjLinker:
             сравнивая каждый кадр с кадром подтверждения с помощью SSIM => получая статистику по score похожести
             кадров => аппроксимируем статистику, чтобы убрать возможные резкие скачки => ищем первое вхождение
             ниже порогового (если нет, по дефолту возвращаем крайнее значение).
+        На выходе имеем оставленный предмет, в котором подменяем список из всех кадров на список из одного кадра
+            оставления, тем самым, не меняя формат данных.
         :param unattended_object: Данные по оставленному предмету.
-        :return: Кадр с моментом оставления предмета.
+        :return: None.
         """
+
+        def struct_sim_check(bbox_coordinates: np.array) -> Tuple[int, int, int, int]:
+            """
+            Проверка на минимальный размер кадра для structural_similarity - 7х7 пикселей.
+            :param bbox_coordinates: Координаты bbox'а предмета.
+            :return: Распакованные и, если необходимо, раздутые координаты bbox'а в формате x1, y1, x2, y2.
+            """
+            tl_x, tl_y, br_x, br_y = bbox_coordinates
+            if br_x - tl_x < 7 or br_y - tl_y < 7:
+                # если координаты bbox'а меньше 7x7, раздуваем его
+                inflated = inflate_polygon(
+                    np.array([[tl_x, tl_y], [br_x, tl_y], [br_x, br_y], [tl_x, br_y]]),
+                    np.ceil(7 / min(br_x - tl_x, br_y - tl_y)))
+                return tuple(np.concatenate([inflated[0], inflated[2]]).astype(int))
+            return tl_x, tl_y, br_x, br_y
+
         mask = np.uint8(unattended_object.contour_mask)
-        x1, y1, x2, y2 = unattended_object.bbox_coordinates
+        # распаковываем и делаем проверку на то, что координаты bbox'а удовлетворяют structural_similarity
+        x1, y1, x2, y2 = struct_sim_check(unattended_object.bbox_coordinates)
         # мАскируем, грейскейлим и обрезаем по ббоксу кадр подтверждения
         masked_reference_frame = cv2.cvtColor(cv2.bitwise_and(
             unattended_object.confirmation_frame, unattended_object.confirmation_frame, mask=mask),
@@ -56,10 +73,10 @@ class PersObjLinker:
         approximated_similarity_scores = savgol_filter(  # аппроксимируем с помощью фильтра Савицкого-Голея
             similarity_scores, int(len(unattended_object.leaving_frames) / 20), 1)
         # подменяем в конкретном экземпляре кадр с оставлением
-        unattended_object.leaving_frames = unattended_object.leaving_frames[
+        unattended_object.leaving_frames = [unattended_object.leaving_frames[
             # берем первое вхождение, ниже пороговго с конца (т.к. статистика шла с конца)
             -next((i for i, s in enumerate(approximated_similarity_scores) if s <= self.similarity_threshold),
-                  len(approximated_similarity_scores))]  # если нет ниже порога, берем крайнее
+                  len(approximated_similarity_scores))]]  # если нет ниже порога, берем крайнее
 
     async def __nearest_object_people(
             self, detections: ultralytics.engine.results.Results,
@@ -126,7 +143,7 @@ class PersObjLinker:
 
         # находим людей в кадре
         detections: ultralytics.engine.results.Results = self.yolo_pose.predict(
-            unattended_object.leaving_frames, classes=[0], verbose=False)[0]
+            unattended_object.leaving_frames[0], classes=[0], verbose=False)[0]
         # если никого не нашли
         if len(detections) == 0:
             unattended_object.set_prob_left(None)  # предполагамых оставителей в None
@@ -148,7 +165,7 @@ class PersObjLinker:
             scale_multiplier += self.inflate_step
         prob_left = detections if not prob_left else prob_left  # если вдруг никого не нашли, возвращаем всех
         people_frames = await asyncio.gather(*[asyncio.create_task(
-            get_prob_left_frame(det, unattended_object.leaving_frames.copy())) for det in prob_left])
+            get_prob_left_frame(det, unattended_object.leaving_frames[0].copy())) for det in prob_left])
         unattended_object.set_prob_left(people_frames)
 
     async def link_objects(self, unattended_objects: List[UnattendedObject]) -> None:

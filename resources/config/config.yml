@@ -1,7 +1,7 @@
 # Temporarily Static Objects
 TSO:
   # чтобы фильтровать совсем уж маленькие фрагменты
-  AREA_THRESH_FRAME_PERCENT: 0.01
+  AREA_THRESH_FRAME_PERCENT: 0.005
   # 4 или 8 пикселей задействовать для связных областей
   CON_COMPONENTS_CONNECTIVITY: 8
 

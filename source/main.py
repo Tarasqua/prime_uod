@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import filedialog
 
 import cv2
-import numpy as np
 
 from utils.roi_polygon_selector import ROIPolygonSelector
 from utils.dist_zones_selector import DistZonesSelector
@@ -53,8 +52,10 @@ class Main:
 
 
 if __name__ == '__main__':
+
     root = tk.Tk()
     root.withdraw()
     file_path = filedialog.askopenfilename()
+    # main = Main(0)
     main = Main(file_path)
     asyncio.run(main.main())
