@@ -153,7 +153,9 @@ def inflate_polygon(polygon_points: np.array, scale_multiplier: float) -> np.arr
 
 
 def async_timed():
-    """Декоратор для подсчета времени выполнения асинхронной функции"""
+    """
+    Декоратор для подсчета времени выполнения асинхронной функции
+    """
     def wrapper(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapped(*args, **kwargs) -> Any:

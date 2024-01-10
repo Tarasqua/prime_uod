@@ -83,7 +83,7 @@ class BackgroundSubtractor:
         :return: Бинаризованная маска со временно статическими объектами.
         """
         resized_frame = cv2.resize(current_frame, self.resize_shape)  # для большей производительности уменьшаем
-        # применяем к копиям кадров быструю и медленную модели фона асинхронно в нескольких потоках
+        # применяем к копиям кадров быструю и медленную модели фона в нескольких асинхронных потоках
         bg_sub_tasks = [asyncio.to_thread(self.__get_frame_wo_movements, resized_frame.copy(), model)
                         for model in [self.gsoc_fast, self.gsoc_slow]]
         frames_wo_movements = await asyncio.gather(*bg_sub_tasks)
