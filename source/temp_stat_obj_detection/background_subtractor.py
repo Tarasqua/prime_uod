@@ -1,7 +1,10 @@
 """
 @tarasqua
 """
+from time import perf_counter
 import asyncio
+import functools
+from concurrent.futures.thread import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -47,7 +50,7 @@ class BackgroundSubtractor:
         self.tso_mask = None
 
     @staticmethod
-    async def __get_frame_wo_movements(
+    def __get_frame_wo_movements(
             frame: np.array, model: cv2.bgsegm.BackgroundSubtractorGSOC) -> np.ndarray:
         """
         Подменяет пиксели в переданном изображении на пиксели фона (полученного путем
@@ -80,8 +83,8 @@ class BackgroundSubtractor:
         :return: Бинаризованная маска со временно статическими объектами.
         """
         resized_frame = cv2.resize(current_frame, self.resize_shape)  # для большей производительности уменьшаем
-        # применяем к копиям кадров быструю и медленную модели фона
-        bg_sub_tasks = [asyncio.create_task(self.__get_frame_wo_movements(resized_frame.copy(), model))
+        # применяем к копиям кадров быструю и медленную модели фона асинхронно в нескольких потоках
+        bg_sub_tasks = [asyncio.to_thread(self.__get_frame_wo_movements, resized_frame.copy(), model)
                         for model in [self.gsoc_fast, self.gsoc_slow]]
         frames_wo_movements = await asyncio.gather(*bg_sub_tasks)
         diff = cv2.absdiff(*frames_wo_movements)  # берем их разницу
