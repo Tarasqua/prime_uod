@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import List, Tuple
 
 import cv2
@@ -28,7 +29,7 @@ class PersObjLinker:
         self.inflate_step = config_.get('PERS_OBJ_LINKER', 'INFLATE_BBOX_STEP')
         self.n_clusters = config_.get('PERS_OBJ_LINKER', 'KMEANS_N_CLUSTERS')
 
-    async def __find_leaving_frame(self, unattended_object: UnattendedObject) -> None:
+    def __find_leaving_frame(self, unattended_object: UnattendedObject) -> None:
         """
         Нахождение момента оставления предмета:
             двигаемся по истории кадров в обратном порядке (т.к. нам нужно будет первое вхождение с конца),
@@ -64,12 +65,13 @@ class PersObjLinker:
             unattended_object.confirmation_frame, unattended_object.confirmation_frame, mask=mask),
             cv2.COLOR_BGR2GRAY)[y1:y2, x1:x2]
         # собираем по кадровую статистику схожести с кадром подтверждения
-        similarity_scores = [structural_similarity(
-            masked_reference_frame,
-            # мАскируем, грейскейлим и обрезаем по ббоксу кадр подтверждения
-            cv2.cvtColor(cv2.bitwise_and(frame, frame, mask=mask), cv2.COLOR_BGR2GRAY)[y1:y2, x1:x2],
-            full=True)[0]  # берем только score, без маски
-                             for frame in unattended_object.leaving_frames[::-1]]  # бежим в обратном порядке
+        similarity_scores = [
+            structural_similarity(
+                masked_reference_frame,
+                # мАскируем, грейскейлим и обрезаем по ббоксу кадр подтверждения
+                cv2.cvtColor(cv2.bitwise_and(frame, frame, mask=mask), cv2.COLOR_BGR2GRAY)[y1:y2, x1:x2],
+                full=True)[0]  # берем только score, без маски
+            for frame in unattended_object.leaving_frames[::-1]]  # бежим в обратном порядке
         approximated_similarity_scores = savgol_filter(  # аппроксимируем с помощью фильтра Савицкого-Голея
             similarity_scores, int(len(unattended_object.leaving_frames) / 20), 1)
         # подменяем в конкретном экземпляре кадр с оставлением
@@ -78,7 +80,7 @@ class PersObjLinker:
             -next((i for i, s in enumerate(approximated_similarity_scores) if s <= self.similarity_threshold),
                   len(approximated_similarity_scores))]]  # если нет ниже порога, берем крайнее
 
-    async def __nearest_object_people(
+    def __nearest_object_people(
             self, detections: ultralytics.engine.results.Results,
             obj_bbox: np.array) -> List[ultralytics.engine.results.Results]:
         """
@@ -119,7 +121,9 @@ class PersObjLinker:
         :return: None.
         """
 
-        async def check_detection(detection: ultralytics.engine.results.Results, bbox: np.array) -> bool:
+        def check_detection(
+                detection: ultralytics.engine.results.Results,
+                bbox: np.array) -> ultralytics.engine.results.Results | None:
             """
             Проверка на то, что нижняя треть (именно та, где, скорее всего, находятся конечности) bbox'а
                 данного человека пересекаются с bbox'ом предмета.
@@ -129,9 +133,9 @@ class PersObjLinker:
             """
             det_bbox = detection.boxes.xyxy.numpy()[0].copy()
             det_bbox[1] += (det_bbox[3] - det_bbox[1]) / 3
-            return True if iou(bbox, det_bbox) > 0 else False
+            return detection if iou(bbox, det_bbox) > 0 else None
 
-        async def get_prob_left_frame(detection: ultralytics.engine.results.Results, ref_frame: np.array) -> np.array:
+        def get_prob_left_frame(detection: ultralytics.engine.results.Results, ref_frame: np.array) -> np.array:
             """
             Возвращает изображение человека, вырезанное из исходного изображения, сделанного в момент оставления.
             :param detection: YOLO-detection человека.
@@ -149,7 +153,7 @@ class PersObjLinker:
             unattended_object.set_prob_left(None)  # предполагамых оставителей в None
             return  # и брякаемся
         # если людей в кадре нашлось много, используем кластеризацию
-        detections = await self.__nearest_object_people(detections, unattended_object.bbox_coordinates) \
+        detections = self.__nearest_object_people(detections, unattended_object.bbox_coordinates) \
             if len(detections) >= self.n_clusters else detections
         # сначала проверяем на пересечение с исходным bbox'ом
         scale_multiplier, prob_left = 1, []
@@ -158,14 +162,15 @@ class PersObjLinker:
         # ищем до первого (первых) пересечения
         while scale_multiplier <= self.max_inflate_bbox:
             polygon = inflate_polygon(polygon, scale_multiplier) if scale_multiplier != 1 else polygon
-            prob_left = [
-                det for det in detections if await check_detection(det, np.concatenate([polygon[0], polygon[2]]))]
-            if prob_left:
+            prob_left_tasks = [asyncio.to_thread(check_detection, det, np.concatenate([polygon[0], polygon[2]]))
+                               for det in detections]
+            prob_left = await asyncio.gather(*prob_left_tasks)
+            if any(prob_left):
+                prob_left = [det for det in prob_left if det is not None]
                 break
             scale_multiplier += self.inflate_step
         prob_left = detections if not prob_left else prob_left  # если вдруг никого не нашли, возвращаем всех
-        people_frames = await asyncio.gather(*[asyncio.create_task(
-            get_prob_left_frame(det, unattended_object.leaving_frames[0].copy())) for det in prob_left])
+        people_frames = [get_prob_left_frame(det, unattended_object.leaving_frames[0].copy()) for det in prob_left]
         unattended_object.set_prob_left(people_frames)
 
     async def link_objects(self, unattended_objects: List[UnattendedObject]) -> None:
@@ -177,11 +182,14 @@ class PersObjLinker:
         :return: None
         """
         # находим кадр оставления предмета
-        [await task for task in
-         [asyncio.create_task(self.__find_leaving_frame(obj)) for obj in unattended_objects]]
+        start = time.perf_counter()
+        finding_tasks = [asyncio.to_thread(self.__find_leaving_frame, obj) for obj in unattended_objects]
+        await asyncio.gather(*finding_tasks)
+        print('find: ', time.perf_counter() - start)
         # связываем предполагаемых оставителей с ним
-        [await task for task in
-         [asyncio.create_task(self.__link(obj)) for obj in unattended_objects]]
+        start = time.perf_counter()
+        await asyncio.gather(*[self.__link(obj) for obj in unattended_objects])
+        print('link inside: ', time.perf_counter() - start)
         # для демонстрации сохраняем предмет и оставителя (оставителей)
-        [await task for task in
-         [asyncio.create_task(save_unattended_object(obj)) for obj in unattended_objects]]
+        saving_tasks = [asyncio.to_thread(save_unattended_object, obj) for obj in unattended_objects]
+        await asyncio.gather(*saving_tasks)

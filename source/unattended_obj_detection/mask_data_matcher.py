@@ -22,7 +22,7 @@ class MaskDataMatcher:
         self.detected_objects = []
         self.history_frames = []
 
-    async def __match_new_object(self, new_object_data: np.array, new_object_mask: np.array) -> None:
+    def __match_new_object(self, new_object_data: np.array, new_object_mask: np.array) -> None:
         """
         Сопоставление нового полученного объекта с уже имеющимися в базе обнаруженных по IOU.
         :param new_object_data: Данные по объекту из маски в формате
@@ -104,7 +104,7 @@ class MaskDataMatcher:
         self.history_frames = history_frames
         self.timestamp = timestamp
         # связываем только что полученные с уже имеющимися объектами
-        match_bbox_tasks = [asyncio.create_task(self.__match_new_object(data, mask))
+        match_bbox_tasks = [asyncio.to_thread(self.__match_new_object, data, mask)
                             for data, mask in mask_data]
-        [await task for task in match_bbox_tasks]
+        await asyncio.gather(*match_bbox_tasks)
         return self.detected_objects

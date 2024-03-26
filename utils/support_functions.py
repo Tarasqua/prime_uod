@@ -66,7 +66,7 @@ def iou(bbox1: np.array, bbox2: np.array) -> np.float32:
     ).numpy()[0][0]
 
 
-async def save_unattended_object(obj: UnattendedObject) -> None:
+def save_unattended_object(obj: UnattendedObject) -> None:
     """
     Сохраняет кадр, сделанный во время обнаружения предмета и делаем пометку об этом.
     :param obj: Оставленный объект - объект класса UnattendedObject.
@@ -98,17 +98,17 @@ async def plot_bboxes(detected_objects: list, frame: np.array) -> np.array:
     if not detected_objects:
         return frame
 
-    async def plot(object_data: DetectedObject) -> None:
+    def plot(object_data: DetectedObject) -> None:
         """Строим один bbox."""
         x1, y1, x2, y2 = object_data.bbox_coordinates
         # подозрительный объект - желтый, оставленный - красный
         color = (30, 255, 255) if not object_data.unattended else (0, 0, 255)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-    plot_tasks = [asyncio.create_task(plot(detected_object))
+    plot_tasks = [asyncio.to_thread(plot, detected_object)
                   for detected_object in detected_objects
                   if detected_object.suspicious or detected_object.unattended]
-    [await task for task in plot_tasks]
+    await asyncio.gather(*plot_tasks)
     return frame
 
 

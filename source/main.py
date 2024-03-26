@@ -52,7 +52,6 @@ class Main:
 
 
 if __name__ == '__main__':
-
     root = tk.Tk()
     root.withdraw()
     file_path = filedialog.askopenfilename()

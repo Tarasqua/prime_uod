@@ -67,7 +67,7 @@ class UOD:
         """
         # копим историю кадров
         self.history_frames.append(current_frame.copy())
-        # обновялем оставленные и берем маски
+        # обновляем оставленные и берем маски
         self.unattended_objects, unattended_masks = \
             await self.data_updater.update_unattended_objects(
                 self.detected_objects, self.unattended_objects, timestamp) if (

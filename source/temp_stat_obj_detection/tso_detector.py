@@ -52,7 +52,7 @@ class TSODetector:
         :return: List из tuple'ов вида [(np.array(centroid_x, centroid_y, x1, y1, x2, y2, area), mask), (...), ...]
         """
 
-        async def label_mask(labels_mask: np.array, label: int) -> np.array:
+        def label_mask(labels_mask: np.array, label: int) -> np.array:
             """
             Заливаем маски черным в тех местах, где не текущий лейбл,
                 а также заливаем белым в тех, где есть текущий лейбл.
@@ -64,7 +64,7 @@ class TSODetector:
             labels_mask[labels_mask == label] = 255
             return labels_mask
 
-        async def process_area(centroid: np.array, stat: np.array, mask: np.array) -> tuple:
+        def process_area(centroid: np.array, stat: np.array, mask: np.array) -> tuple:
             """
             Обработка связной области, полученной из модели фона.
             :param centroid: Координаты центроида связной области.
@@ -81,11 +81,11 @@ class TSODetector:
         # находим связные области в маске
         connected_areas = cv2.connectedComponentsWithStats(tso_mask, self.con_comp_connectivity, cv2.CV_32S)
         # находим маски для каждой найденной связной области
-        masks_tasks = [asyncio.create_task(label_mask(connected_areas[1].copy(), i))
+        masks_tasks = [asyncio.to_thread(label_mask, connected_areas[1].copy(), i)
                        for i in range(1, connected_areas[0])]  # учитываем тот факт, что 0 - это весь кадр
         masks = await asyncio.gather(*masks_tasks)
         # обрабатываем полученные области и возвращаем их
-        process_area_tasks = [asyncio.create_task(process_area(centroid, stat, mask))
+        process_area_tasks = [asyncio.to_thread(process_area, centroid, stat, mask)
                               for centroid, stat, mask in zip(connected_areas[3][1:], connected_areas[2][1:], masks)]
         data_masks = await asyncio.gather(*process_area_tasks)
         return [(data, mask) for data, mask in data_masks if data is not None]  # фильтруем None
@@ -107,9 +107,8 @@ class TSODetector:
             return tso_mask
 
         dist_zones_frames = await self.dist_zones_handler.get_dist_zones_frames(current_frame)
-        tso_masks = await asyncio.gather(*[
-            asyncio.create_task(get_mask(frame, model))
-            for frame, model in zip(dist_zones_frames, self.bg_subtractors)])
+        tso_masks_coros = [get_mask(frame, model) for frame, model in zip(dist_zones_frames, self.bg_subtractors)]
+        tso_masks = await asyncio.gather(*tso_masks_coros)
         return await self.dist_zones_handler.get_merged_mask(tso_masks)
 
     async def process_frame(self, current_frame: np.array, det_masks: Masks or None, uo_masks: list or None) -> tuple:
@@ -126,7 +125,7 @@ class TSODetector:
         # применяем ROI к маске
         tso_mask = cv2.bitwise_and(tso_mask, self.roi_stencil)
 
-        async def remove_person(det_mask: np.array) -> None:
+        def remove_person(det_mask: np.array) -> None:
             """
             По сегментационной маске, вычитает человека из маски со временно статическими предметами
                 (на случай, если человек задержался в кадре).
@@ -136,7 +135,7 @@ class TSODetector:
             mask = ops.scale_image(det_mask, self.frame_shape[::-1])[:, :, 0]
             tso_mask[mask == 1] = 0
 
-        async def remove_unattended(uo_mask: np.array) -> None:
+        def remove_unattended(uo_mask: np.array) -> None:
             """
             По маске с оставленным предметом, вычитает данный предмет из маски со временно статическими объектами.
             :param uo_mask: Маска с оставленным предметом.
@@ -146,10 +145,12 @@ class TSODetector:
 
         # если есть люди, вычитаем их из маски
         if det_masks is not None:
-            [await task for task in [asyncio.create_task(remove_person(mask)) for mask in det_masks.data.numpy()]]
+            remove_people_tasks = [asyncio.to_thread(remove_person, mask) for mask in det_masks.data.numpy()]
+            await asyncio.gather(*remove_people_tasks)
         # если есть оставленные, также вычитаем их из маски
         if uo_masks is not None:
-            [await task for task in [asyncio.create_task(remove_unattended(uo_mask)) for uo_mask in uo_masks]]
+            remove_unattended_tasks = [asyncio.to_thread(remove_unattended, uo_mask) for uo_mask in uo_masks]
+            await asyncio.gather(*remove_unattended_tasks)
         # находим объекты в маске
         mask_data = await self.__get_mask_data(tso_mask)
         return mask_data, tso_mask  # ДЛЯ ОТЛАДКИ возвращаем и маску

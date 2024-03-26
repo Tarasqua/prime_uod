@@ -50,12 +50,12 @@ class DistZonesHandler:
         :return: List из зон дальности.
         """
 
-        async def get_zone(zone_points: np.array) -> np.array:
+        def get_zone(zone_points: np.array) -> np.array:
             """Вспомогательная функция для выделения одной зоны дальности."""
             return frame.copy()[zone_points[1]:zone_points[3], zone_points[0]:zone_points[2]]
 
-        zones = await asyncio.gather(*[
-            asyncio.create_task(get_zone(zone)) for zone in self.dist_zones_points])
+        zones_tasks = [asyncio.to_thread(get_zone, zone) for zone in self.dist_zones_points]
+        zones = await asyncio.gather(*zones_tasks)
         return [*zones, frame]
 
     async def get_merged_mask(self, masks: list[np.array]) -> np.array:
@@ -66,11 +66,11 @@ class DistZonesHandler:
             где последняя - маска с общим планом.
         :return: Объединенная маска со временно статическими объектами.
         """
-        async def merge_masks(mask: np.array, points: list) -> np.array:
+        def merge_masks(mask: np.array, points: list) -> None:
             """Вспомогательная функция для объединения маски зоны дальности с маской общего плана."""
             masks[-1][points[1]:points[3], points[0]:points[2]] = mask
 
-        [await task for task in [
-            asyncio.create_task(merge_masks(mask, points))
-            for mask, points in zip(masks[:-1][::-1], self.dist_zones_points[::-1])]]
+        masks_tasks = [asyncio.to_thread(merge_masks, mask, points) for
+                       mask, points in zip(masks[:-1][::-1], self.dist_zones_points[::-1])]
+        await asyncio.gather(*masks_tasks)
         return masks[-1]

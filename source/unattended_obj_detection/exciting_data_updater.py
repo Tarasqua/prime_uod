@@ -1,4 +1,5 @@
 import asyncio
+import time
 from itertools import combinations
 
 import cv2
@@ -36,7 +37,7 @@ class DataUpdater:
         :return: Tuple из списков обнаруженных и оставленных предметов.
         """
 
-        async def update_object(detected_object: DetectedObject) -> DetectedObject:
+        def update_object(detected_object: DetectedObject) -> DetectedObject:
             """Обновление одного объекта."""
             # проверка по таймауту на подозрительно долгое пребывание в кадре
             obs_time = timestamp - detected_object.detection_timestamp
@@ -68,7 +69,8 @@ class DataUpdater:
                 return detected_object
 
         # проверяем и обновляем обнаруженные
-        update_detected_tasks = [asyncio.create_task(update_object(detected_object))
+
+        update_detected_tasks = [asyncio.to_thread(update_object, detected_object)
                                  for detected_object in detected_objects]
         detected_objects = await asyncio.gather(*update_detected_tasks)
         # фильтруем None
@@ -86,13 +88,13 @@ class DataUpdater:
         :return: Список из обнаруженных предметов без дубликатов.
         """
 
-        async def check_pair(obj1: DetectedObject, obj2: DetectedObject) -> DetectedObject:
+        def check_pair(obj1: DetectedObject, obj2: DetectedObject) -> DetectedObject:
             """Смотрим, пересекаются ли объекты и возвращаем тот, что появился позже"""
             if iou(obj1.bbox_coordinates, obj2.bbox_coordinates) > 0:
                 return obj2 if obj1.detection_timestamp < obj2.detection_timestamp else obj1
 
         # таким образом убираем те объекты, которые задублировались и их время обнаружения позже
-        duplicates_tasks = [asyncio.create_task(check_pair(obj1, obj2)) for obj1, obj2
+        duplicates_tasks = [asyncio.to_thread(check_pair, obj1, obj2) for obj1, obj2
                             in combinations(detected_objects, 2) if obj1.suspicious and obj2.suspicious]
         duplicates = await asyncio.gather(*duplicates_tasks)
         return [obj for obj in detected_objects if obj not in duplicates or not obj.suspicious]
@@ -109,7 +111,7 @@ class DataUpdater:
         :return: Tuple из списков обновленных оставленных предметов и масок оставленных предметов.
         """
 
-        async def update_object(unattended_object: UnattendedObject) -> np.array or None:
+        def update_object(unattended_object: UnattendedObject) -> np.array or None:
             """Обновление счетчика с возвратом маски."""
             # учитываем то, что данный оставленный больше не наблюдается
             if unattended_object.object_id not in [det_obj.object_id for det_obj in detected_objects]:
@@ -119,9 +121,11 @@ class DataUpdater:
                 return None
 
         # связываем предметы с предполагаемыми оставителями, если они еще не связаны
+        start = time.perf_counter()
         await self.pers_obj_linker.link_objects([obj for obj in unattended_objects if not obj.linked])
+        print('link: ', time.perf_counter() - start)
         # обновляем объекты и складываем маски
-        update_tasks = [asyncio.create_task(update_object(unattended_object))
+        update_tasks = [asyncio.to_thread(update_object, unattended_object)
                         for unattended_object in unattended_objects]
         unattended_masks = await asyncio.gather(*update_tasks)
         # фильтруем None
