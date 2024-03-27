@@ -100,7 +100,7 @@ class UnattendedObject(BaseModel):
     :param obs_loss_timestamp: Timestamp потери объекта в маске.
     :param leaving_frames: История кадров оставления предмета.
         Как только объект появился - записываем историю его появления.
-    :param probably_left_object_people: Кадры людей, которые, вероятнее всего, оставили предмет.
+    :param probably_left_object_people: Ббоксы людей, которые, вероятнее всего, оставили предмет.
     :param contour_mask: Бинаризованная маска кадра, в которой белым залит контур объекта, а черным - фон.
     :param bbox_coordinates: Координаты bbox'а объекта.
     :param linked: Флаг, отвечающий за то, что для данного предмета найден человек, оставивший его.

@@ -21,9 +21,11 @@ class PersObjLinker:
         config_ = Config('config.yml')
         self.similarity_threshold = config_.get(
             'PERS_OBJ_LINKER', 'SIMILARITY_THRESHOLD') / 100
-        self.yolo_pose = set_yolo_model(
+        self.yolo_detector = set_yolo_model(
             config_.get('PERS_OBJ_LINKER', 'HUMAN_DETECTION', 'YOLO_MODEL'),
             'boxes', 'detect')
+        self.yolo_detector.predict(  # для того, чтобы производительность в рантайме была выше
+            np.random.randint(0, 256, (1000, 1000, 3), dtype=np.uint8), classes=[0], verbose=False)
         self.yolo_conf = config_.get('PERS_OBJ_LINKER', 'HUMAN_DETECTION', 'YOLO_CONFIDENCE')
         self.max_inflate_bbox = config_.get('PERS_OBJ_LINKER', 'MAX_INFLATE_BBOX')
         self.inflate_step = config_.get('PERS_OBJ_LINKER', 'INFLATE_BBOX_STEP')
@@ -135,18 +137,8 @@ class PersObjLinker:
             det_bbox[1] += (det_bbox[3] - det_bbox[1]) / 3
             return detection if iou(bbox, det_bbox) > 0 else None
 
-        def get_prob_left_frame(detection: ultralytics.engine.results.Results, ref_frame: np.array) -> np.array:
-            """
-            Возвращает изображение человека, вырезанное из исходного изображения, сделанного в момент оставления.
-            :param detection: YOLO-detection человека.
-            :param ref_frame: Изображение, сделанное в момент оставления.
-            :return: Обрезанное изображение человека.
-            """
-            x1, y1, x2, y2 = detection.boxes.xyxy.numpy()[0].astype(int)
-            return ref_frame[y1:y2, x1:x2]
-
         # находим людей в кадре
-        detections: ultralytics.engine.results.Results = self.yolo_pose.predict(
+        detections: ultralytics.engine.results.Results = self.yolo_detector.predict(
             unattended_object.leaving_frames[0], classes=[0], verbose=False)[0]
         # если никого не нашли
         if len(detections) == 0:
@@ -170,8 +162,7 @@ class PersObjLinker:
                 break
             scale_multiplier += self.inflate_step
         prob_left = detections if not prob_left else prob_left  # если вдруг никого не нашли, возвращаем всех
-        people_frames = [get_prob_left_frame(det, unattended_object.leaving_frames[0].copy()) for det in prob_left]
-        unattended_object.set_prob_left(people_frames)
+        unattended_object.set_prob_left([det.boxes.xyxy.numpy()[0].astype(int) for det in prob_left])
 
     async def link_objects(self, unattended_objects: List[UnattendedObject]) -> None:
         """
@@ -182,14 +173,10 @@ class PersObjLinker:
         :return: None
         """
         # находим кадр оставления предмета
-        start = time.perf_counter()
         finding_tasks = [asyncio.to_thread(self.__find_leaving_frame, obj) for obj in unattended_objects]
         await asyncio.gather(*finding_tasks)
-        print('find: ', time.perf_counter() - start)
         # связываем предполагаемых оставителей с ним
-        start = time.perf_counter()
         await asyncio.gather(*[self.__link(obj) for obj in unattended_objects])
-        print('link inside: ', time.perf_counter() - start)
         # для демонстрации сохраняем предмет и оставителя (оставителей)
         saving_tasks = [asyncio.to_thread(save_unattended_object, obj) for obj in unattended_objects]
         await asyncio.gather(*saving_tasks)

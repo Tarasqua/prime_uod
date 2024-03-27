@@ -1,10 +1,9 @@
 """
 @tarasqua
 """
-from typing import List
+from typing import List, Tuple
 from collections import deque
 
-import cv2
 import numpy as np
 import ultralytics.engine.results
 
@@ -57,7 +56,8 @@ class UOD:
         self.history_frames = deque(
             maxlen=int(config_.get('UOD', 'HISTORY_ACCUMULATION_TIME') * stream_fps))
 
-    async def detect_(self, current_frame: np.array, timestamp: float) -> np.array:
+    async def detect_(self, current_frame: np.array, timestamp: float) -> (
+            Tuple)[List[DetectedObject], List[UnattendedObject]]:
         """
         Нахождение оставленных предметов в последовательности кадров.
         :param current_frame: Текущее изображение последовательности.
@@ -77,10 +77,10 @@ class UOD:
         if self.remove_people:  # плюс удаляем из маски людей, если это требуется
             detections: ultralytics.engine.results = self.yolo_seg.predict(
                 current_frame, classes=[0], verbose=False, conf=self.yolo_conf)[0]
-            mask_data, tso_mask = await self.tso_detector.process_frame(
+            mask_data = await self.tso_detector.process_frame(
                 current_frame, detections.masks, unattended_masks)
         else:
-            mask_data, tso_mask = await self.tso_detector.process_frame(
+            mask_data = await self.tso_detector.process_frame(
                 current_frame, None, unattended_masks)
         # сопоставляем новые с уже имеющимися
         self.detected_objects = await self.mask_data_matcher.match_mask_data(
@@ -92,7 +92,4 @@ class UOD:
                     self.detected_objects, self.unattended_objects, timestamp, current_frame.copy())
             # удаляем возможные дубликаты подозрительных предметов
             self.detected_objects = await self.data_updater.check_suspicious_duplicates(self.detected_objects)
-        # отрисовываем подозрительные и/или оставленные объекты (временное решение)
-        detections_frame = await plot_bboxes(self.detected_objects, current_frame.copy())
-        # return detections_frame
-        return np.concatenate([detections_frame, cv2.merge((tso_mask, tso_mask, tso_mask))], axis=1)
+        return self.detected_objects, self.unattended_objects

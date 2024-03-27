@@ -78,12 +78,13 @@ def save_unattended_object(obj: UnattendedObject) -> None:
                              datetime.datetime.fromtimestamp(obj.detection_timestamp).strftime("%B %d, %H:%M:%S"))
     if not os.path.exists(directory):
         os.mkdir(directory)
-    x1, y1, x2, y2 = obj.bbox_coordinates
-    # сохраняем предполагаемых оставителей
-    for i, human_frame in enumerate(obj.probably_left_object_people):
-        cv2.imwrite(os.path.join(directory, f'suspicious_{i}.png'), human_frame)
     # момент оставления
-    cv2.imwrite(os.path.join(directory, f'leaving_moment.png'), obj.leaving_frames[0])
+    leaving_moment = obj.leaving_frames[0].copy()
+    [cv2.rectangle(leaving_moment, (x1, y1), (x2, y2), (0, 140, 255), 2)
+     for x1, y1, x2, y2 in obj.probably_left_object_people]
+    x1, y1, x2, y2 = obj.bbox_coordinates
+    cv2.imwrite(os.path.join(directory, 'leaving_moment.png'),
+                cv2.rectangle(leaving_moment, (x1, y1), (x2, y2), (0, 0, 255), 2))
     # момент подтверждения
     cv2.imwrite(os.path.join(directory, f'confirmation_moment.png'),
                 cv2.rectangle(obj.confirmation_frame.copy(), (x1, y1), (x2, y2), (0, 0, 255), 2))

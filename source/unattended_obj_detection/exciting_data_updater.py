@@ -7,7 +7,6 @@ import numpy as np
 
 from utils.support_functions import iou
 from utils.templates import DetectedObject, UnattendedObject
-from source.person_object_linking.person_object_linker import PersObjLinker
 
 
 class DataUpdater:
@@ -19,7 +18,6 @@ class DataUpdater:
         self.disappearance_timeout = disappearance_timeout
         # время, которое сегмент оставленного предмета будет заливаться черным в маске после его исчезновения
         self.fill_unattended_cont_timeout = suspicious_timeout + unattended_timeout
-        self.pers_obj_linker = PersObjLinker()
 
     async def update_detected_objects(
             self, detected_objects: list[DetectedObject], unattended_objects: list[UnattendedObject],
@@ -120,10 +118,6 @@ class DataUpdater:
             else:
                 return None
 
-        # связываем предметы с предполагаемыми оставителями, если они еще не связаны
-        start = time.perf_counter()
-        await self.pers_obj_linker.link_objects([obj for obj in unattended_objects if not obj.linked])
-        print('link: ', time.perf_counter() - start)
         # обновляем объекты и складываем маски
         update_tasks = [asyncio.to_thread(update_object, unattended_object)
                         for unattended_object in unattended_objects]

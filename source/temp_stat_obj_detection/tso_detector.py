@@ -111,7 +111,7 @@ class TSODetector:
         tso_masks = await asyncio.gather(*tso_masks_coros)
         return await self.dist_zones_handler.get_merged_mask(tso_masks)
 
-    async def process_frame(self, current_frame: np.array, det_masks: Masks or None, uo_masks: list or None) -> tuple:
+    async def process_frame(self, current_frame: np.array, det_masks: Masks or None, uo_masks: list or None) -> list:
         """
         Обработка изображения, нахождение временно статических объектов в кадре.
         :param current_frame: Текущий кадр последовательности.
@@ -153,4 +153,4 @@ class TSODetector:
             await asyncio.gather(*remove_unattended_tasks)
         # находим объекты в маске
         mask_data = await self.__get_mask_data(tso_mask)
-        return mask_data, tso_mask  # ДЛЯ ОТЛАДКИ возвращаем и маску
+        return mask_data
